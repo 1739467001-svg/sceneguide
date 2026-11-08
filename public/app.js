@@ -394,8 +394,11 @@
   function renderMeta(meta) {
     state.meta = meta;
 
-    // Hero 统计：纯数字走滚动动画，组合值（"593 / 597"）直接落
-    const scene = meta.scenes.find((s) => s.source === 'openstreetmap') ?? meta.scenes[0];
+    // Hero 统计：纯数字走滚动动画，组合值（"593 / 597"）直接落。
+    // 多真实场景后锁定旗舰场景展示（数量最大、演示主场景）
+    const scene = meta.scenes.find((s) => s.id === 'zjgsu-xiasha')
+      ?? meta.scenes.find((s) => s.source === 'openstreetmap')
+      ?? meta.scenes[0];
     const set = (key, val) => {
       const el = $(`[data-stat="${key}"]`);
       if (!el) return;
@@ -1838,39 +1841,61 @@ ${JSON.stringify(
 
     // 3) 场景与画布
     if (meta) {
-      const scene = meta.scenes.find((s) => s.source === 'openstreetmap') ?? meta.scenes[0];
-      state.sceneId = scene.id;
-      $('#sceneTag').textContent = scene.name;
-      $('#srcTag').textContent = scene.source === 'openstreetmap' ? 'OpenStreetMap 实时数据' : '内置演示场景';
-
-      const detail = await getJSON(`api/v1/scene/${encodeURIComponent(scene.id)}`);
-      if (detail) {
-        state.scene = detail;
-        fitView();
-        draw();
-        // 三维视图懒加载：先让二维立即可用，再异步拉 three.js
-        if (state.view3d === '3d') {
-          cv3d.hidden = false;
-          cv2d.hidden = true;
-          init3D().then(() => {
-            state.scene3d?.resize();
-            if (state.lastRoute) {
-              state.scene3d?.setRoute(state.lastRoute.polyline, state.lastRouteMeta ?? {});
-            }
-          });
-        }
-      }
+      const scene = meta.scenes.find((s) => s.id === 'zjgsu-xiasha')
+        ?? meta.scenes.find((s) => s.source === 'openstreetmap')
+        ?? meta.scenes[0];
+      renderSceneSelect(meta.scenes, scene.id);
+      await loadScene(scene);
     }
 
-    // 4) 示例问题
-    // 示例都选在 OSM 步道真实连通的地标对上，因此返回的是实测路径而非估算
-    const samples = [
+    // 4) 示例问题（按场景挑选：都选在 OSM 步道真实连通的地标对上）
+    renderChips();
+    const hint = $('#modeHint');
+    if (hint) hint.textContent = MODE_HINTS.guide;
+    $('#askBtn').addEventListener('click', () => ask($('#q').value.trim()));
+    $('#q').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') ask($('#q').value.trim());
+    });
+
+    // 5) 首屏结果
+    if (state.apiOk && state.sceneId) {
+      const first = SAMPLES[state.sceneId]?.[0] ?? SAMPLES.default[0];
+      $('#q').value = first;
+      ask(first);
+    } else {
+      setResult(
+        '<div class="notice notice-amber">后端服务未连接，实时演示不可用。上方「支付链路」章节展示的是真实抓取过的协议报文快照。</div>',
+      );
+    }
+  }
+
+  /* ────────────── 场景切换 ──────────────
+     多个真实场景共用同一条 OSM 管线（bbox → 路网缝合 → 地标抽取），
+     切换器让它可见：管线能泛化，不是给一个校区手搓的数据集。 */
+
+  // 每个场景的示例问题都人工核对过：起点终点在场景里且步道连通
+  const SAMPLES = {
+    'zjgsu-xiasha': [
       '从A教学楼到C教学楼怎么走',
       '从六艺楼到男生宿舍怎么走',
       '从清风苑食堂到1号学生公寓怎么走',
       '从行政楼到综合楼怎么走',
       '逸夫楼在哪里',
-    ];
+    ],
+    // 良渚示例全部经过 API 实测：11 对步道连通里的代表（见验收记录）
+    'liangzhu-culture-village': [
+      '从良渚博物院到良渚国家考古遗址公园怎么走',
+      '从美丽公路良渚绿道到蒲公英学校怎么走',
+      '从探路者中心到访客中心/电商总部怎么走',
+      '从数字馆到南门怎么走',
+      '杭州国家版本馆在哪里',
+    ],
+    'demo-park': ['从南门到图书馆怎么走', '图书馆在哪里'],
+    default: [],
+  };
+
+  function renderChips() {
+    const samples = SAMPLES[state.sceneId] ?? SAMPLES.default;
     $('#chips').innerHTML = samples
       .map((s) => `<button class="chip" type="button">${esc(s)}</button>`)
       .join('');
@@ -1882,23 +1907,63 @@ ${JSON.stringify(
         ask(c.textContent);
       });
     });
+  }
 
-    const hint = $('#modeHint');
-    if (hint) hint.textContent = MODE_HINTS.guide;
-    $('#askBtn').addEventListener('click', () => ask($('#q').value.trim()));
-    $('#q').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') ask($('#q').value.trim());
+  function renderSceneSelect(scenes, currentId) {
+    const sel = $('#sceneSel');
+    if (!sel || scenes.length <= 1) return;
+    sel.innerHTML = scenes
+      .map(
+        (s) =>
+          `<option value="${esc(s.id)}">${esc(s.name)} · ${esc(s.namedPois)} 地标${
+            s.source === 'openstreetmap' ? '' : '（演示）'
+          }</option>`,
+      )
+      .join('');
+    sel.value = currentId;
+    sel.addEventListener('change', async () => {
+      const next = scenes.find((s) => s.id === sel.value);
+      if (!next || state.busy) return;
+      await loadScene(next);
+      renderChips();
+      // 切场景后自动问一条该场景的示例，评委零操作就能看到新场景在动
+      const first = SAMPLES[next.id]?.[0];
+      if (first && state.apiOk) {
+        $('#q').value = first;
+        ask(first);
+      }
     });
+  }
 
-    // 5) 首屏结果
-    if (state.apiOk && state.sceneId) {
-      const first = '从A教学楼到C教学楼怎么走';
-      $('#q').value = first;
-      ask(first);
-    } else {
-      setResult(
-        '<div class="notice notice-amber">后端服务未连接，实时演示不可用。上方「支付链路」章节展示的是真实抓取过的协议报文快照。</div>',
-      );
+  async function loadScene(scene) {
+    state.sceneId = scene.id;
+    $('#sceneTag').textContent = scene.name;
+    $('#srcTag').textContent = scene.source === 'openstreetmap' ? 'OpenStreetMap 实时数据' : '内置演示场景';
+
+    // 清上一场景的路线与三维实例（三维持有旧场景的几何，必须 dispose）
+    state.lastRoute = null;
+    state.lastRouteMeta = null;
+    if (state.scene3d) {
+      try {
+        state.scene3d.dispose();
+      } catch {}
+      state.scene3d = null;
+    }
+
+    const detail = await getJSON(`api/v1/scene/${encodeURIComponent(scene.id)}`);
+    if (!detail) return;
+    state.scene = detail;
+    fitView();
+    draw();
+    if (state.view3d === '3d') {
+      cv3d.hidden = false;
+      cv2d.hidden = true;
+      init3D().then(() => {
+        state.scene3d?.resize();
+        if (state.lastRoute) {
+          state.scene3d?.setRoute(state.lastRoute.polyline, state.lastRouteMeta ?? {});
+        }
+      });
     }
   }
 

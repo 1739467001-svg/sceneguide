@@ -44,8 +44,10 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
   const FREE_DAILY_LIMIT = 3;
   /** 按 IP 的上限：cookie 可重置，防刷必须落到 IP 哈希。
    *  ⚠️ 取值要容忍 NAT（校园/公司 WiFi 几百人共享一个出口 IP）——
-   *  限的是「规模化刷量」（万级），不是正常共网流量。 */
-  const FREE_DAILY_IP_LIMIT = 200;
+   *  限的是「规模化刷量」（万级），不是正常共网流量。
+   *  500 = 500 个访客额度的上限，办公室/宿舍楼一天也未必到；
+   *  实测 200 会被高频验收 + 批量集成测试一天烧完（都是同 IP）。 */
+  const FREE_DAILY_IP_LIMIT = 500;
   /** 演示代付按 IP 的每日上限（沙箱接口真实出账，防刷爆） */
   const DEMO_PAY_DAILY_IP_LIMIT = 100;
   /** 权益额度有效期（天）：多额度商品发放的次数余额在多久内有效 */

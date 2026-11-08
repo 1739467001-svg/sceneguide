@@ -966,3 +966,9 @@ table.data tbody tr:hover { background: rgba(255, 255, 255, 0.028); }
   .hero h1 .grad-l { display: inline; }
   .hero h1 .grad { text-wrap: balance; }
 }
+
+#sceneSel {
+  background: var(--bg-deep); border: 1px solid var(--border-strong); color: var(--text);
+  border-radius: 9px; padding: 8px 10px; font-size: 12.5px; font-family: inherit; outline: none;
+  max-width: 210px; cursor: pointer;
+}

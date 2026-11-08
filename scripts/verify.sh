@@ -134,6 +134,20 @@ else
   bad "缺少 OSM 归属声明"
 fi
 
+# 管线泛化性：同一管线构建的第二个真实场景
+SCENES=$("${CURL[@]}" "$BASE/api/v1/scenes")
+LZ=$(node -e "
+  try{const j=JSON.parse(process.argv[1]);
+    const s=(j.scenes||[]).find(s=>s.id==='liangzhu-culture-village');
+    console.log(s&&s.namedPois>=20?String(s.namedPois):'');
+  }catch(e){}
+" "$SCENES")
+if [[ -n "$LZ" ]]; then
+  ok "第二真实场景「良渚文化村」（${LZ} 地标）—— 同一 OSM 管线可泛化"
+else
+  bad "缺少第二个真实场景（liangzhu-culture-village）"
+fi
+
 # ── 6. 协议报文快照 ──────────────────────────────────────────
 step "6. 站点协议报文快照"
 if "${CURL[@]}" -o /dev/null -w '%{http_code}' "$BASE/data/protocol-trace.json" | grep -q '^200$'; then

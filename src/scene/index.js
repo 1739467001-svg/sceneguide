@@ -255,19 +255,26 @@ export function answerGuide({ sceneId, query, originHint }) {
     return { ok: false, error: 'SCENE_NOT_FOUND', message: `未知场景：${sceneId}` };
   }
 
-  const entities = findEntities(scene, `${query ?? ''} ${originHint ?? ''}`);
+  // 🔴 起点参数与问题文本必须**分开**匹配：早期版本把两者拼成一段文本，
+  //    终点在场景里匹配不到时会「借用」起点的匹配结果，
+  //    退化成 起点→起点 的 0 米路线（实测：良渚问「到玉鸟集」→「从博物院到博物院 0 米」）。
+  //    拆开后：问题实体只从 query 来；originHint 单独解析成起点候补。
+  const entities = findEntities(scene, query ?? '');
+  const originEntity = originHint ? (findEntities(scene, originHint)[0] ?? null) : null;
   const intent = detectIntent(query, entities, scene);
 
   const base = {
     scene: { id: scene.id, name: scene.name, description: scene.description },
     query,
     intent,
-    candidates: entities.slice(0, 5).map((e) => ({
-      id: e.node.id,
-      name: e.node.name,
-      type: e.node.type,
-      matched: e.matched,
-    })),
+    candidates: [...entities, ...(originEntity ? [originEntity] : [])]
+      .slice(0, 5)
+      .map((e) => ({
+        id: e.node.id,
+        name: e.node.name,
+        type: e.node.type,
+        matched: e.matched,
+      })),
   };
 
   if (intent === 'overview' || entities.length === 0) {
@@ -313,7 +320,8 @@ export function answerGuide({ sceneId, query, originHint }) {
   // route / route_to_origin：先按句式解析起终点，解析不了再退回「候选顺序」
   const endpoints = parseEndpoints(scene, query);
   const toEntity = endpoints?.to ?? entities[0];
-  const fromEntity = endpoints?.from ?? entities[1] ?? (originHint ? entities[0] : null);
+  // 起点优先级：句式解析 > origin 参数 > 问题文本里的第二个实体
+  const fromEntity = endpoints?.from ?? originEntity ?? entities[1] ?? null;
 
   if (!fromEntity) {
     const text = `已定位到${toEntity.node.name}。告诉我你的起点（或在参数里带上 origin），我就能规划路线。`;
@@ -349,6 +357,19 @@ export function answerGuide({ sceneId, query, originHint }) {
   }
   const fromFinal = resolved.from;
   const toFinal = resolved.to;
+
+  // 🔴 同点守卫：起终点解析到同一个节点时，不输出「0 米路线」这种自欺欺人的答案。
+  //    走到这里的典型场景是：用户问的目的地在场景里没有收录（如商业区的 OSM 命名不同）。
+  //    诚实做法是说明没找到，并列出场景里实际可导航的地标。
+  if (fromFinal.node.id === toFinal.node.id) {
+    const named = namedNodes(scene);
+    const listed = named.slice(0, 10).map((n) => n.name);
+    const text =
+      `没有在${scene.name}里找到「${toFinal.matched}」这个目的地` +
+      `（当前收录 ${named.length} 个可导航地标${listed.length ? `，例如${listed.join('、')}` : ''}）。` +
+      `换一个目的地，或告诉我起点，我来重新规划。`;
+    return { ok: true, ...base, answer: text, route: null, pois: [poiOf(fromFinal.node)] };
+  }
 
   const route = planRoute(scene, fromFinal.node.id, toFinal.node.id);
   if (!route.found) {

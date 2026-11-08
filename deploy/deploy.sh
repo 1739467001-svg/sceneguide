@@ -24,14 +24,19 @@ if [[ "$TARGET" == "aliyun" ]]; then
   PORT=3001
   echo "▸ 发布到 ${HOST}:${APP_DIR}（Docker Compose · 端口 ${PORT}）"
 
-  # 密钥与运行数据永不上传（服务器侧已有权威副本）
-  tar -czf /tmp/sg-src.tar.gz --exclude 'node_modules' --exclude 'data' \
+  # 密钥与运行数据永不上传（服务器侧已有权威副本）；
+  # data/scenes/*.json 是构建产物（纯 OSM 衍生数据、无密钥无用户数据），必须随包发布
+  tar -czf /tmp/sg-src.tar.gz --exclude 'node_modules' --exclude 'data/*.db*' \
+    --exclude 'data/analytics*' --exclude 'data/orders*' \
     --exclude '.alipay-sandbox.json' --exclude 'config/production.json' \
     --exclude '.git' --exclude '*.log' \
-    -C "$(pwd)" public src scripts config SKILL.md package.json package-lock.json README.md
+    -C "$(pwd)" public src scripts config SKILL.md package.json package-lock.json README.md data/scenes
   scp -q /tmp/sg-src.tar.gz "$HOST:/tmp/"
   ssh "$HOST" "cd ${APP_DIR} && tar -xzf /tmp/sg-src.tar.gz && rm /tmp/sg-src.tar.gz"
   rm -f /tmp/sg-src.tar.gz
+  # 🔴 场景数据必须落到挂载卷：compose 把 ../data 挂载为容器的 /app/data，
+  #    解压到 app/data/scenes 会被卷遮蔽（历史踩过一次 404 三连）。
+  ssh "$HOST" "mkdir -p /srv/apps/sceneguide/data/scenes && cp -f ${APP_DIR}/data/scenes/*.json /srv/apps/sceneguide/data/scenes/ 2>/dev/null || true" 
 
   echo "▸ 重启容器（deps 卷已存在时跳过 npm ci，约 8s）"
   ssh "$HOST" "cd /srv/apps/sceneguide && docker compose restart"
