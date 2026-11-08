@@ -244,8 +244,13 @@
 
   function fitView() {
     if (!state.scene?.graph) return;
-    const w = cv.getBoundingClientRect().width;
-    const h = cv.getBoundingClientRect().height;
+    // 🔴 场景切换发生在 3D 视图下时，2D canvas 处于 hidden——
+    //    getBoundingClientRect 会返回 0，缩放/平移全被算成负数，
+    //    切回 2D 就是「所有点挤在角落」（实测：良渚 2D 首切必现）。
+    //    hidden 时退回画布内部分辨率，保证 fitView 数学仍然成立。
+    const rect = cv.getBoundingClientRect();
+    const w = rect.width || cv.width || 800;
+    const h = rect.height || cv.height || 600;
 
     // 以「命名地标」的分布来取景，而不是全部路网节点：
     // OSM 里常有孤立的路段碎片，它们会把包围盒撑大，导致主体被压成一小团。
@@ -1485,7 +1490,7 @@ ${JSON.stringify(
 
     // 证书
     const cert = q.certificate
-      ? `<div class="cert">
+      ? `<div class="cert" id="certCard">
           <div class="cert-head"><span class="tag cyan">✓ 已完成</span><strong>完成证书</strong><span class="cert-score num">${q.score} 分</span></div>
           <div class="cert-body">
             <div><span class="k">任务</span><span>${esc(q.title)}</span></div>
@@ -1495,6 +1500,10 @@ ${JSON.stringify(
             <div class="cert-hash"><span class="k">可核验哈希</span><span class="mono">${esc(q.certificate.verifiable_by)}</span></div>
           </div>
           <div class="notice notice-cyan" style="margin-top:12px">${esc(q.certificate.verify_hint)}</div>
+          <div class="cert-actions no-print">
+            <button class="btn btn-ghost btn-sm" id="certPrintBtn" type="button">打印 / 存为 PDF</button>
+            <span style="font-size:11.5px;color:var(--text-faint)">这张证书是研学产品的交付物——家长与老师可以直接留档</span>
+          </div>
         </div>`
       : `<div class="notice notice-blue" style="margin-top:14px">
           证书<b>在全部打卡完成后才会颁发</b>——哈希覆盖的是实际打卡记录（任务 id、各站顺序、打卡时刻、总里程、得分），
@@ -1527,6 +1536,19 @@ ${JSON.stringify(
 
     $$('.clue-btn').forEach((btn) => {
       btn.addEventListener('click', () => doCheckin(btn.dataset.quest, btn.dataset.point));
+    });
+
+    // 证书打印：先给 body 打标记（print 样式按标记只显示证书），打完自动清除
+    $('#certPrintBtn')?.addEventListener('click', () => {
+      document.body.classList.add('printing-cert');
+      const cleanup = () => {
+        document.body.classList.remove('printing-cert');
+        window.removeEventListener('afterprint', cleanup);
+      };
+      window.addEventListener('afterprint', cleanup);
+      window.print();
+      // afterprint 在部分浏览器不触发时的兜底
+      setTimeout(cleanup, 1500);
     });
   }
 

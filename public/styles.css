@@ -972,3 +972,34 @@ table.data tbody tr:hover { background: rgba(255, 255, 255, 0.028); }
   border-radius: 9px; padding: 8px 10px; font-size: 12.5px; font-family: inherit; outline: none;
   max-width: 210px; cursor: pointer;
 }
+
+/* ───────────────────────── 证书打印 ───────────────────────── */
+.cert-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+
+@media print {
+  /* 打印的是研学交付物：白纸黑字 + 机构感排版，其它一切隐藏 */
+  body.printing-cert * { visibility: hidden !important; }
+  body.printing-cert #certCard, body.printing-cert #certCard * { visibility: visible !important; }
+  body.printing-cert #certCard {
+    position: absolute; inset: 24mm; margin: 0; padding: 0;
+    background: #fff; color: #111;
+    border: 2.5px double #0e7a63; border-radius: 4px;
+    padding: 14mm 16mm;
+    box-shadow: none;
+  }
+  body.printing-cert .cert-head { color: #111; border-bottom: 1.5px solid #0e7a63; padding-bottom: 8px; }
+  body.printing-cert .cert-head .tag {
+    background: #0e7a63; color: #fff; padding: 2px 10px; border-radius: 4px; font-size: 12px;
+  }
+  body.printing-cert .cert-score { color: #0e7a63; font-size: 30px; }
+  body.printing-cert .cert-body div {
+    color: #111; font-size: 13.5px; padding: 6px 0;
+    border-bottom: 1px dotted #bbb; display: flex; gap: 14px;
+  }
+  body.printing-cert .cert-body .k { color: #555; min-width: 5em; }
+  body.printing-cert .cert-hash { word-break: break-all; }
+  body.printing-cert .cert-hash .mono { color: #0e7a63; font-weight: 600; }
+  body.printing-cert .cert-body + .notice { background: #f2faf8 !important; color: #0b5c4c !important; }
+  body.printing-cert .cert-actions { display: none !important; }
+  @page { margin: 10mm; }
+}
