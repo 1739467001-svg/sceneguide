@@ -651,10 +651,27 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
   /* ────────────── 场景任务：打卡闭环 ────────────── */
 
   /** 查询任务状态（含已打卡与证书） */
+  /**
+   * 统一的任务呈现层：仓储出库是驼峰，前端渲染读蛇形别名。
+   * 🔴 初次履约路径手工对齐过这套别名，但打卡/查询路径之前没有 ——
+   *    完成证书页会渲染出 undefined m / undefined min（实测抓到）。
+   */
+  function presentQuest(quest) {
+    if (!quest) return quest;
+    return {
+      ...quest,
+      scene: { id: quest.sceneId },
+      total_distance_m: quest.totalDistanceM,
+      estimated_minutes: quest.estimatedMinutes,
+      measuredLegs: (quest.legs ?? []).filter((l) => l.measured).length,
+      totalLegs: (quest.legs ?? []).length,
+    };
+  }
+
   router.get('/api/v1/quests/:id', (req, res) => {
     const quest = repository.findQuest(req.params.id);
     if (!quest) return res.status(404).json({ code: 'QUEST_NOT_FOUND' });
-    return res.json(quest);
+    return res.json(presentQuest(quest));
   });
 
   /**
@@ -698,7 +715,7 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
       });
     }
 
-    return res.json({ ok: true, quest });
+    return res.json({ ok: true, quest: presentQuest(quest) });
   });
 
   /**

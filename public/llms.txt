@@ -1,0 +1,55 @@
+# 三维问路 SceneGuide
+
+> 可被 Agent 自动购买的三维场景导览服务（支付宝 A2M 智能收 · HTTP 402 按量付费）。
+> 本文件面向 Agent 与其宿主：一次读完即可知道本服务是什么、怎么调用、怎么支付。
+
+## 服务是什么
+
+基于 OpenStreetMap 真实步道拓扑的场景导览 API：输入场景与自然语言问题
+（如「从图书馆到行政楼怎么走」），返回经图上最短路计算验证的路线、
+途经点位、距离与步行时间，附可复算的证据哈希（SHA-256）。
+另提供「场景任务」交付物：线索链 → 逐站打卡（服务端强制顺序）→
+完成才颁发覆盖实际打卡记录的可核验证书。
+
+- 演示站点: http://121.43.80.231/sceneguide/
+- MCP 发现端点: POST http://121.43.80.231/sceneguide/mcp （JSON-RPC 2.0，tools/list 暴露 scene_guide[annotations.paid=true] 与 scene_guide_scenes）
+- 验收脚本: BASE_URL=http://121.43.80.231/sceneguide bash scripts/verify.sh （52 项，含真实支付）
+
+## 计费
+
+| 档位 | 参数 | 生产价 | 交付物 |
+|---|---|---|---|
+| 单次导览 | `?tier=single` | ¥0.50/次 | 完整导览结果（路线+计量+证据哈希） |
+| 十次导览包 | `?tier=pack10` | ¥4.50/包 | 10 次导览额度（权益台账，逐次扣减） |
+| 场景任务 | `?mode=quest` | ¥9.90/次 | 线索链+打卡+可核验证书 |
+
+沙箱环境所有档位实收 ¥0.01（沙箱 mock 服务注册价固定）。
+
+## 调用与支付流程（HTTP 402）
+
+1. `GET /api/v1/guide?scene=zjgsu-xiasha&query=…`
+   → `402 Payment Required` + `Payment-Needed` 响应头（Base64URL 账单）
+2. 将 `Payment-Needed` 头原样交给支付宝技能
+   `alipay-pay-for-402-service` 引导用户付款（买方不解码、不改动）
+3. 付款后携 `Payment-Proof` 头重试同一请求
+   → `200` + `Payment-Validation` 头 + JSON 资源
+
+无需预下单 OpenAPI、无需注册回调；账单由商家本地 RSA2 签名构造。
+
+## 主要端点
+
+- `GET /api/v1/guide` : 付费资源（402/200 两种形态，见上）
+- `GET /api/v1/guide?preview=1` : 免费试看（每访客每日 3 次，只给答案文本）
+- `GET /api/v1/scenes` / `GET /api/v1/scene/:id` : 场景目录与可视化数据（免费）
+- `GET /api/v1/entitlements` : 当前访客的额度余额（免费）
+- `GET /api/v1/orders/:outTradeNo` : 订单状态（免费）
+- `GET /api/v1/quests/:id` + `POST /api/v1/quests/:id/checkin` : 任务与打卡
+- `GET /api/v1/stats` / `GET /api/v1/growth` : 计量与渠道漏斗看板
+
+## Agent 接入提示
+
+- 已安装 `@alipay/agent-payment` 的买方 Agent：收到 402 后直接走技能，无需本文件其余部分。
+- 自研宿主：按上面的 402 流程实现即可；账单字段见
+  `https://github.com/…/sceneguide` 仓库 `技术规格-A2M-402.md`（含三个实测坑：嵌套结构+扁平签名子集、
+  字典序拼接、PKCS#1 密钥格式）。
+- 礼貌性要求：免费试看接口每访客每日 3 次，请勿脚本化刷取。

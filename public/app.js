@@ -1323,7 +1323,7 @@ ${JSON.stringify(
       });
       const j = await res.json();
       if (j.error) {
-        setError(j.error, '沙箱收银未完成，可重试。');
+        setError(j.error, '服务端已自动重试 3 次。支付宝沙箱偶发繁忙，请点一次按钮重试。');
         return;
       }
       renderAnswer(j.content, { tradeNo: j.tradeNo, envelope: j.envelope, entitlement: j.envelope?.entitlement });

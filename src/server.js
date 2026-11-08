@@ -40,7 +40,7 @@ export function createApp({ config, services, sellerId, repository, alipayClient
       req.path.startsWith('/data') ||
       [
         '/styles.css', '/app.js', '/three-scene.js', '/sw.js', '/manifest.webmanifest',
-        '/icon-192.png', '/icon-512.png', '/robots.txt', '/sitemap.xml',
+        '/icon-192.png', '/icon-512.png', '/robots.txt', '/sitemap.xml', '/llms.txt',
       ].includes(req.path);
     if (staticPath) return next();
 

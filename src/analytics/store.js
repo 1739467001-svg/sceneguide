@@ -453,7 +453,41 @@ export function createAnalyticsStore({ file = 'data/analytics.db' } = {}) {
         }
       }
 
-      const channels = perChannel.map((row) => {
+      // 🔴 测试渠道聚合：验收脚本每次运行都会制造 verify-<ts>、e2e-* 等一次性渠道，
+      //    不聚合的话评委打开看板第一眼是整屏测试行，正式渠道反而被淹没。
+      //    口径：referrals 表注册过的 = 正式渠道；(direct) 保留；其余全部折进 (测试渠道)。
+      const officialCodes = new Set(registered.map((r) => r.code));
+      const official = perChannel.filter((r) => r.code === '(direct)' || officialCodes.has(r.code));
+      const adhoc = perChannel.filter((r) => r.code !== '(direct)' && !officialCodes.has(r.code));
+
+      const mergeRows = (rows) => ({
+        code: rows.code,
+        visitors: rows.visitors,
+        previews: rows.previews ?? 0,
+      });
+      const channelsRaw = official.map(mergeRows);
+
+      if (adhoc.length) {
+        // 测试渠道的订单侧数据也要并进聚合行（不然 paid 口径对不上 overall）
+        const adhocCodes = new Set(adhoc.map((r) => r.code));
+        const adhocOrders = { challenges: 0, paid: 0, revenue: 0, paidSelfTest: 0, paidReal: 0 };
+        for (const [code, bucket] of byCode) {
+          if (!adhocCodes.has(code)) continue;
+          adhocOrders.challenges += bucket.challenges;
+          adhocOrders.paid += bucket.paid;
+          adhocOrders.revenue += bucket.revenue;
+          adhocOrders.paidSelfTest += bucket.paidSelfTest;
+          adhocOrders.paidReal += bucket.paidReal;
+        }
+        channelsRaw.push({
+          code: '(测试渠道)',
+          visitors: adhoc.reduce((s, r) => s + r.visitors, 0),
+          previews: adhoc.reduce((s, r) => s + (r.previews ?? 0), 0),
+        });
+        byCode.set('(测试渠道)', adhocOrders);
+      }
+
+      const channels = channelsRaw.map((row) => {
         const o = byCode.get(row.code) ?? {};
         const paid = o.paid ?? 0;
         return {
@@ -470,6 +504,12 @@ export function createAnalyticsStore({ file = 'data/analytics.db' } = {}) {
       });
 
       const sum = (key) => channels.reduce((acc, c) => acc + (c[key] ?? 0), 0);
+      // 正式渠道按访客数排，测试聚合行永远垫底
+      channels.sort((a, b) => {
+        if (a.code === '(测试渠道)') return 1;
+        if (b.code === '(测试渠道)') return -1;
+        return b.visitors - a.visitors;
+      });
       const overall = {
         visitors: visitorCount,
         previews: sum('previews'),
