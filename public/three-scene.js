@@ -51,7 +51,12 @@ export function createScene3D(canvas, data, opts = {}) {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(COLORS.fog);
-  scene.fog = new THREE.FogExp2(COLORS.fog, 0.00042);
+  // 🔴 雾密度必须随取景跨度缩放：0.00042 是按下沙（span≈340m、相机≈310m）调的，
+  //    换到 span 1600 的稀疏场景时相机拉到 ~1470m，远处建筑会被雾整体吞掉
+  //    （实测：良渚三维除质心附近外全部隐入雾中）。比例保持「340m 视距下的雾感」不变。
+  const FOG_DENSITY_AT_340 = 0.00042;
+  const sceneFog = new THREE.FogExp2(COLORS.fog, FOG_DENSITY_AT_340);
+  scene.fog = sceneFog;
 
   const camera = new THREE.PerspectiveCamera(46, 1, 1, 6000);
   const controls = new OrbitControls(camera, canvas);
@@ -78,19 +83,35 @@ export function createScene3D(canvas, data, opts = {}) {
 
   // ── 取景中心（命名地标密集区，优于整个校园包围盒）────────────
   const poiPts = (data.pois ?? []).map((p) => toWorld(p.xy[0], p.xy[1], 0));
+  // 建筑足迹中心点并入取景集合：良渚这类 POI 与建筑群分布错位的场景，
+  // 只看 POI 会把主体建筑切出画面（实测：画面只剩质心附近一小团）
+  const bldPts = (data.footprints ?? [])
+    .filter((f) => f.ring?.length >= 3 && !/[路街道巷弄]$/.test(f.name ?? ''))
+    .map((f) => {
+      const xs = f.ring.map((r) => r[0]);
+      const ys = f.ring.map((r) => r[1]);
+      return toWorld((Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2, 0);
+    });
+  const framePts = [...poiPts, ...bldPts];
   const focus = new THREE.Vector3(0, 0, 0);
   let focusSpan = Math.max(spanX, spanY);
-  if (poiPts.length) {
-    const fx = poiPts.map((p) => p.x);
-    const fz = poiPts.map((p) => p.z);
+  if (framePts.length) {
+    const fx = framePts.map((p) => p.x);
+    const fz = framePts.map((p) => p.z);
     focus.set((Math.min(...fx) + Math.max(...fx)) / 2, 0, (Math.min(...fz) + Math.max(...fz)) / 2);
+    // 🔴 相机跨度必须随场景密度自适应：340m 上限是为「下沙 134 地标挤在一起」调的，
+    //    良渚这类「36 地标散布 4km」的场景会被切成只剩质心附近一小团（实测画面几乎全空）。
+    //    稀疏场景放宽到联合分布的实际范围（上限 1600m，再远建筑就小到没有信息量）。
+    const frameSpan = Math.max(
+      Math.max(...fx) - Math.min(...fx),
+      Math.max(...fz) - Math.min(...fz),
+    );
     focusSpan = Math.max(
       180,
-      Math.min(
-        Math.max(Math.max(...fx) - Math.min(...fx), Math.max(...fz) - Math.min(...fz)),
-        340,
-      ),
+      Math.min(frameSpan, poiPts.length >= 40 ? 340 : 2200),
     );
+    // 雾密度随视距反向缩放（见上方 FOG_DENSITY_AT_340 注释）
+    sceneFog.density = FOG_DENSITY_AT_340 * (340 / focusSpan);
   }
 
   // ── 地面 ─────────────────────────────────────────────────

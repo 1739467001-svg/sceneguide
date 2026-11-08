@@ -1055,7 +1055,12 @@ ${JSON.stringify(
     if (skeleton) skeleton.hidden = false;
     if (skeletonText) skeletonText.textContent = '正在加载三维场景（three.js 约 2MB）…';
     try {
-      const mod = await import('./three-scene.js?v=20261107-live4');
+      // 🔴 动态导入必须继承 app.js 自身的版本号：硬编码版本曾漏改两次
+      // （live4 卡了两个 UI 大版本，实测三维改动不生效还不报错）。
+      //   app.js 的 <script src> 带 ?v=…，从这里取，升级时只改 index.html 一处。
+      const selfVer =
+        document.querySelector('script[src*="app.js"]')?.src.split('?')[1] ?? '';
+      const mod = await import(`./three-scene.js${selfVer ? `?${selfVer}` : ''}`);
       state.scene3d = mod.createScene3D(cv3d, state.scene);
       if (state.lastRoute) {
         state.scene3d.setRoute(state.lastRoute.polyline, state.lastRouteMeta ?? {});
