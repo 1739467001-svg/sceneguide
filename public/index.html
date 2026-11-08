@@ -10,7 +10,7 @@
 <meta property="og:description" content="基于真实地理拓扑的场景导览服务。Agent 自行完成支付，按次计费，用量可核验。" />
 <meta property="og:type" content="website" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%232f7bff'/%3E%3Ctext x='16' y='22' font-size='16' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'%3E三%3C/text%3E%3C/svg%3E" />
-<link rel="stylesheet" href="styles.css?v=20261108-live11" />
+<link rel="stylesheet" href="styles.css?v=20261108-ui1" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#070b16" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -21,6 +21,7 @@
 <meta name="twitter:card" content="summary_large_image" />
 </head>
 <body>
+<div class="read-progress" id="readProgress" aria-hidden="true"></div>
 <a class="skip-link" href="#main">跳到主要内容</a>
 
 <!-- ══════════════════════════ 导航 ══════════════════════════ -->
@@ -60,7 +61,7 @@
 
       <h1>
         <span>三维问路</span>
-        <span class="grad">能被 Agent 自动购买的<br />三维场景导览服务</span>
+        <span class="grad"><span class="grad-l">能被 Agent 自动购买的</span><span class="grad-l">三维场景导览服务</span></span>
       </h1>
 
       <p class="hero-sub">
@@ -863,6 +864,6 @@ fulfill_status: UNFULFILLED ──► PENDING_CONFIRM ──► FULFILLED
 </footer>
 
 <!-- 静态资源带版本号：这个站的 JS 就是作品本体，任何缓存命中都会让评委看到旧版本 -->
-<script src="app.js?v=20261108-live11"></script>
+<script src="app.js?v=20261108-ui4"></script>
 </body>
 </html>

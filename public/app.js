@@ -155,10 +155,57 @@
   // 兜底：无论何种情况，5 秒后全部可见
   setTimeout(revealAll, 5000);
 
-  // 导航高亮与入场动画共用同一套位置判定：
+  // 导航高亮 + 入场动画共用一道低频轮询兜底：
   // 滚动事件并不总是可靠（程序化跳转、锚点直达、浏览器恢复滚动位置都可能不派发），
-  // 所以除了事件触发，还挂一道低频轮询兜底——高亮停在隔壁板块上是很显眼的破功。
-  setInterval(syncSpy, 600);
+  // 实测评委用锚点直达时整块板块空白——事件驱动必须有位置扫描兜底，
+  // 高亮停在隔壁板块 / 区块空白 5 秒都是很显眼的破功。
+  setInterval(() => {
+    syncSpy();
+    sweepReveal();
+  }, 600);
+
+  /* ── 阅读进度条 ──
+     评委滚动到哪了，页面自己说出来；宽度用 rAF 节流。 */
+  const progressBar = $('#readProgress');
+  if (progressBar) {
+    let progressTicking = false;
+    const updateProgress = () => {
+      const max = document.body.scrollHeight - window.innerHeight;
+      const pct = max > 0 ? Math.min(1, window.scrollY / max) : 0;
+      progressBar.style.width = `${(pct * 100).toFixed(2)}%`;
+      progressTicking = false;
+    };
+    window.addEventListener(
+      'scroll',
+      () => {
+        if (progressTicking) return;
+        progressTicking = true;
+        requestAnimationFrame(updateProgress);
+      },
+      { passive: true },
+    );
+    // 锚点直达 / 程序化滚动不派发 scroll 事件时的兜底（与上方轮询同节奏）
+    setInterval(updateProgress, 600);
+    updateProgress();
+  }
+
+  /* ── Hero 数字滚动 ──
+     134 / 597 这类硬数字从 0 滚到目标值：首屏的「数据感」是滚出来的。
+     🔴 先同步写最终值、再用 rAF 从 0 覆盖：后台标签页 rAF 会被节流甚至不派发，
+     若只依赖 rAF，数字会一直停在占位符「—」（实测踩过）。 */
+  function countUp(el, target, { duration = 1100 } = {}) {
+    el.textContent = String(target);
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const start = performance.now();
+    const step = (now) => {
+      const t = Math.min(1, (now - start) / duration);
+      // easeOutCubic：前快后慢，落定时干脆
+      const eased = 1 - Math.pow(1 - t, 3);
+      el.textContent = String(Math.round(target * eased));
+      if (t < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
 
   // 复制按钮
   $$('.copy-btn').forEach((btn) => {
@@ -347,11 +394,13 @@
   function renderMeta(meta) {
     state.meta = meta;
 
-    // Hero 统计
+    // Hero 统计：纯数字走滚动动画，组合值（"593 / 597"）直接落
     const scene = meta.scenes.find((s) => s.source === 'openstreetmap') ?? meta.scenes[0];
     const set = (key, val) => {
       const el = $(`[data-stat="${key}"]`);
-      if (el) el.textContent = val;
+      if (!el) return;
+      if (typeof val === 'number' && Number.isFinite(val)) countUp(el, val);
+      else el.textContent = val;
     };
     set('pois', scene?.namedPois ?? '—');
     set('graph', scene ? `${scene.nodes} / ${scene.edges}` : '—');

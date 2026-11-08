@@ -22,6 +22,27 @@ ok()    { printf '  \033[32m✓\033[0m %s\n' "$*"; PASS=$((PASS+1)); }
 bad()   { printf '  \033[31m✗\033[0m %s\n' "$*"; FAIL=$((FAIL+1)); }
 step()  { printf '\n\033[36m▸ %s\033[0m\n' "$*"; }
 
+# ── 沙箱收银退避重试 ────────────────────────────────────────
+# 支付宝沙箱收银对连续支付有低概率拒单（PAY_SUBMIT_FAILED 系统繁忙，实测），
+# 验收脚本一次要打 4 笔真实支付，不加重试整份报告会随机挂在不同项上。
+# 用法：DEMO_PAY=$(demo_pay_with_retry '<json body>')
+demo_pay_with_retry() {
+  local body="$1" attempt resp
+  for attempt in 1 2 3 4; do
+    resp=$("${CURL[@]}" -X POST "$BASE/api/v1/demo/pay" \
+      -H 'Content-Type: application/json' -d "$body")
+    if node -e "
+      try{const j=JSON.parse(process.argv[1]);process.exit(j.error||j.code?1:0)}
+      catch(e){process.exit(1)}
+    " "$resp"; then
+      printf '%s' "$resp"
+      return 0
+    fi
+    [[ $attempt -lt 4 ]] && sleep 6
+  done
+  printf '%s' "$resp"
+}
+
 bold "三维问路 · SceneGuide 验收"
 bold "目标：$BASE"
 
@@ -59,9 +80,7 @@ fi
 
 # ── 2. 支付与交付：真实走一遍支付宝沙箱收银 ──────────────────
 step "2. 完成支付并交付资源"
-PAY=$("${CURL[@]}" -X POST "$BASE/api/v1/demo/pay" \
-  -H 'Content-Type: application/json' \
-  -d '{"scene":"zjgsu-xiasha","query":"从浙江工商大学图书馆到行政楼怎么走"}')
+PAY=$(demo_pay_with_retry '{"scene":"zjgsu-xiasha","query":"从浙江工商大学图书馆到行政楼怎么走"}')
 TRADE=$(node -e "try{const j=JSON.parse(process.argv[1]);console.log(j.tradeNo||'')}catch(e){}" "$PAY")
 if [[ -n "$TRADE" ]]; then
   ok "支付完成，支付宝交易号 ${TRADE}（32 位）"
@@ -154,9 +173,7 @@ fi
 
 # ── 8. 场景任务（研学档位，¥9.90 交付物）────────────────────
 step "8. 场景任务（研学档位）"
-QUEST=$("${CURL[@]}" -X POST "$BASE/api/v1/demo/pay" \
-  -H 'Content-Type: application/json' \
-  -d '{"scene":"zjgsu-xiasha","query":"","mode":"quest","level":"normal"}')
+QUEST=$(demo_pay_with_retry '{"scene":"zjgsu-xiasha","query":"","mode":"quest","level":"normal"}')
 Q_OK=$(node -e "
   try{
     const j=JSON.parse(process.argv[1]);
@@ -218,8 +235,7 @@ if [[ -n "$QID" ]]; then
     bad "全部打卡完成后未颁发证书"
   fi
   # 完成前不应有证书（用新任务再验一次）
-  Q2=$("${CURL[@]}" -X POST "$BASE/api/v1/demo/pay" -H 'Content-Type: application/json' \
-    -d '{"scene":"zjgsu-xiasha","query":"","mode":"quest"}' 2>/dev/null)
+  Q2=$(demo_pay_with_retry '{"scene":"zjgsu-xiasha","query":"","mode":"quest"}')
   Q2ID=$(node -e "try{const j=JSON.parse(process.argv[1]);console.log(j.content?.quest?.id||'')}catch(e){}" "$Q2")
   Q2CERT=$(node -e "try{const j=JSON.parse(process.argv[1]);console.log(j.content?.quest?.certificate?'has':'none')}catch(e){}" "$Q2")
   if [[ "$Q2CERT" == "none" ]]; then
@@ -272,9 +288,24 @@ done
 # ── 11. 权益额度台账（多额度商品必须真的交付 N 次）──────────
 step "11. 权益额度台账（十次导览包）"
 ECJ=$(mktemp)
-PACK=$("${CURL[@]}" -b "$ECJ" -c "$ECJ" -X POST "$BASE/api/v1/demo/pay" \
-  -H 'Content-Type: application/json' \
-  -d '{"scene":"zjgsu-xiasha","query":"从浙江工商大学图书馆到行政楼怎么走","tier":"pack10"}')
+# 十次包购买需要先有访客 cookie；带 cookie 的重试版（重试时复用同一访客）
+demo_pay_cookie_retry() {
+  local cj="$1" body="$2" attempt resp
+  for attempt in 1 2 3 4; do
+    resp=$("${CURL[@]}" -b "$cj" -c "$cj" -X POST "$BASE/api/v1/demo/pay" \
+      -H 'Content-Type: application/json' -d "$body")
+    if node -e "
+      try{const j=JSON.parse(process.argv[1]);process.exit(j.error||j.code?1:0)}
+      catch(e){process.exit(1)}
+    " "$resp"; then
+      printf '%s' "$resp"
+      return 0
+    fi
+    [[ $attempt -lt 4 ]] && sleep 6
+  done
+  printf '%s' "$resp"
+}
+PACK=$(demo_pay_cookie_retry "$ECJ" '{"scene":"zjgsu-xiasha","query":"从浙江工商大学图书馆到行政楼怎么走","tier":"pack10"}')
 ENT=$(node -e "
   try{const j=JSON.parse(process.argv[1]);const e=j.envelope?.entitlement;
     console.log(e?[e.quota,e.used,e.remaining].join('|'):'');}catch(e){}
