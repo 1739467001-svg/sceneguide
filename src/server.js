@@ -75,6 +75,19 @@ export function createApp({ config, services, sellerId, repository, alipayClient
     });
   });
 
+  /* ── 基线安全响应头 ──
+     上线作品的底层卫生：不嵌他站（防点击劫持）、MIME 嗅探防护、
+     引用来源最小化、禁用不需要的浏览器能力。CSP 不在此处：
+     本站内联脚本/样式较多，贸然上 CSP 容易把站点自己打挂，等 HTTPS 后单独评估。 */
+  app.use((req, res, next) => {
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('X-Frame-Options', 'SAMEORIGIN');
+    res.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    res.set('Cross-Origin-Opener-Policy', 'same-origin');
+    next();
+  });
+
   app.use(
     createGuideRouter({
       repository,

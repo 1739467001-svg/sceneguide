@@ -171,6 +171,33 @@ else
   bad "工具未标注 paid"
 fi
 
+# tools/call 全链路：免费工具直接交付；付费工具返回 payment_required 与账单
+MCP_CALL=$("${CURL[@]}" -X POST "$BASE/mcp" -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"scene_guide_scenes","arguments":{}}}' 2>/dev/null)
+if node -e "
+  try{const j=JSON.parse(process.argv[1]);
+    const t=j.result?.content?.[0]?.text ?? '';
+    process.exit(t.includes('scenes')&&t.includes('zjgsu-xiasha')?0:1);
+  }catch(e){process.exit(1)}
+" "$MCP_CALL"; then
+  ok "MCP tools/call 免费工具直接交付场景目录"
+else
+  bad "MCP 免费工具调用未返回场景数据"
+fi
+
+MCP_PAYWALL=$("${CURL[@]}" -X POST "$BASE/mcp" -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"scene_guide","arguments":{"scene":"zjgsu-xiasha","query":"从图书馆到行政楼怎么走"}}}' 2>/dev/null)
+if node -e "
+  try{const j=JSON.parse(process.argv[1]);
+    const sc=j.result?.structuredContent ?? {};
+    process.exit(sc.status==='payment_required'&&sc.out_trade_no?0:1);
+  }catch(e){process.exit(1)}
+" "$MCP_PAYWALL"; then
+  ok "MCP 付费工具返回 payment_required + 账单（Agent 采购链路第一环）"
+else
+  bad "MCP 付费工具未返回 payment_required"
+fi
+
 # ── 8. 场景任务（研学档位，¥9.90 交付物）────────────────────
 step "8. 场景任务（研学档位）"
 QUEST=$(demo_pay_with_retry '{"scene":"zjgsu-xiasha","query":"","mode":"quest","level":"normal"}')

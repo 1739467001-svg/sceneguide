@@ -7,7 +7,7 @@ description: 当用户询问某个具体场所（校园、园区、景区、展�
 
 本 Skill 提供**三维场景导览**服务——基于真实地理拓扑计算路线，而不是通用大模型推测。
 
-与通用地图/问答助手的区别：返回的路线途经点、距离与方位都来自场景图拓扑计算，并附带 `evidence.geometry_hash` 供核验。
+与通用地图/问答助手的区别：返回的路线途经点、距离与方位都来自场景图拓扑计算，并附带 `evidence.geometryHash` 供核验。
 
 该服务是基于 **A2M 智能收协议（HTTP 402）** 的付费资源。买家（消费者 Agent）通过本 Skill 向卖家服务端发起资源请求，服务端将返回 402 `Payment-Needed` 响应报文，买家需将该报文传递给支付宝的 `alipay-pay-for-402-service` 技能以完成付款。
 
@@ -22,22 +22,26 @@ description: 当用户询问某个具体场所（校园、园区、景区、展�
 
 ### 第一步：请求资源
 
-向以下 URL 发起请求：
+向以下 URL 发起请求（演示环境已上线，可直接调用）：
 
 ```
-curl -v "https://<服务域名>/api/v1/guide?scene=<场景ID>&query=<用户问题>&origin=<可选起点>"
+curl -v "http://121.43.80.231/sceneguide/api/v1/guide?scene=<场景ID>&query=<用户问题>&origin=<可选起点>&tier=<可选档位>"
 ```
 
 参数说明：
 
 | 参数 | 必填 | 说明 |
 |---|---|---|
-| `scene` | 否 | 场景 ID，默认 `demo-park` |
+| `scene` | 否 | 场景 ID，默认 `demo-park`；推荐 `zjgsu-xiasha`（真实校园，134 地标） |
 | `query` | 是 | 用户的导览问题（自然语言） |
 | `origin` | 否 | 起点名称，用于「去某地」类问题 |
-| `tier` | 否 | 计费档位，默认 `single` |
+| `tier` | 否 | 计费档位：`single`（单次）｜`pack10`（十次包） |
 
 场景目录：`GET /api/v1/scenes`
+
+> 关于 `pack10`：一次付费获得 10 次导览额度，存放在卖家侧权益台账（按访客绑定）。
+> 买家付清后，同一访客的后续调用**自动从余额扣减、直接返回资源，不再产生新的支付挑战**；
+> 可随时 `GET /api/v1/entitlements` 查询余额。
 
 ### 第二步：处理 402 响应
 
@@ -69,7 +73,7 @@ curl -v "https://<服务域名>/api/v1/guide?scene=<场景ID>&query=<用户问�
     "pois": [ /* 相关点位 */ ],
     "evidence": {
       "source": "scene-graph",
-      "geometry_hash": "sha256:..."
+      "geometryHash": "sha256:..."
     }
   },
   "trade_no": "2026...",
