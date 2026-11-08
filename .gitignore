@@ -1,0 +1,16 @@
+node_modules/
+
+# 运行时数据库（订单 / 归因 / 反馈）——含真实用户行为，不进仓库
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/analytics/
+data/orders/
+# 但构建好的场景数据要进仓库：否则克隆下来跑不起来（要连 Overpass 现拉）
+!data/scenes/
+
+config/production.json
+/.alipay-sandbox.json
+.env
+*.log
+.DS_Store

@@ -1,0 +1,29 @@
+[Unit]
+Description=SceneGuide - 三维问路（PAYATHON 2026 参赛作品）
+After=network.target
+
+[Service]
+Type=simple
+# 部署目录；如路径不同请同步修改 deploy.sh 里的 REMOTE_DIR
+WorkingDirectory=/opt/sceneguide/scene-guide
+ExecStart=/usr/bin/node src/server.js
+Restart=always
+RestartSec=3
+User=sguser
+Group=sguser
+
+# 生产环境：使用 config/production.json + 生产网关
+Environment=NODE_ENV=production
+Environment=ALIPAY_ENV=production
+Environment=PORT=3000
+# 卖家展示名（收银台可见）
+Environment=ALIPAY_SELLER_NAME=三维问路
+
+# 安全基线
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/sceneguide/scene-guide/data
+
+[Install]
+WantedBy=multi-user.target

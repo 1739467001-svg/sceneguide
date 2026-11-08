@@ -1,0 +1,56 @@
+{
+  "name": "三维问路 · SceneGuide",
+  "short_name": "三维问路",
+  "description": "可被 Agent 自动购买的三维场景导览服务。基于真实 OpenStreetMap 地理拓扑，通过支付宝 A2M 智能收（HTTP 402）按量计费。",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "browser"],
+  "orientation": "any",
+  "background_color": "#070b16",
+  "theme_color": "#070b16",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "categories": ["productivity", "navigation", "utilities"],
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "实时演示",
+      "short_name": "演示",
+      "description": "打开可真实操作的场景导览与支付演示",
+      "url": "./#demo"
+    },
+    {
+      "name": "支付链路报文",
+      "short_name": "报文",
+      "description": "查看真实抓取的 402 协议往返报文",
+      "url": "./#protocol"
+    },
+    {
+      "name": "交付与验收",
+      "short_name": "验收",
+      "description": "四份提交物与可自行执行的验收清单",
+      "url": "./#deliverables"
+    }
+  ]
+}

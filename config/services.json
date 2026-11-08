@@ -1,0 +1,23 @@
+{
+  "_comment": "服务档位表。平台约束：注册的服务单价必须与实际扣费金额一致，因此每档位固定单价与固定额度。沙箱用 api_mock_service_id；生产需在支付宝服务市场注册后替换为真实 serviceId。",
+  "tiers": {
+    "single": {
+      "serviceId": "api_mock_service_id",
+      "unitPrice": "0.50",
+      "quota": 1,
+      "label": "单次导览"
+    },
+    "pack10": {
+      "serviceId": "api_mock_service_id",
+      "unitPrice": "4.50",
+      "quota": 10,
+      "label": "十次导览包"
+    },
+    "quest": {
+      "serviceId": "api_mock_service_id",
+      "unitPrice": "9.90",
+      "quota": 1,
+      "label": "场景任务（研学）"
+    }
+  }
+}

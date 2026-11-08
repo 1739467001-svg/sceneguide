@@ -1,0 +1,27 @@
+{
+  "name": "scene-guide",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "三维问路 · 可被 Agent 自动购买的场景导览服务（A2M 智能收 / HTTP 402 按量付费）",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "smoke": "node scripts/smoke.js",
+    "verify": "bash scripts/verify.sh",
+    "icons": "node scripts/make-icons.mjs",
+    "trace": "node scripts/capture-protocol-trace.js && node scripts/capture-api-reference.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "alipay-sdk": "^4.14.0",
+    "better-sqlite3": "^13.0.3",
+    "compression": "^1.8.2",
+    "express": "^5.3.0",
+    "qrcode": "^1.5.4",
+    "three": "^0.187.0"
+  }
+}

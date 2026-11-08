@@ -1,0 +1,424 @@
+{
+  "capturedAt": "2026-11-05T19:08:37.786Z",
+  "env": "sandbox",
+  "request": {
+    "method": "GET",
+    "url": "/api/v1/guide?scene=zjgsu-xiasha&query=…"
+  },
+  "step1_challenge": {
+    "status": 402,
+    "statusText": "Payment Required",
+    "headerName": "Payment-Needed",
+    "headerValuePreview": "eyJwcm90b2NvbCI6eyJvdXRfdHJhZGVfbm8iOiJTR18xNzkzOTA1NzE2MzgxXzFiMTI5OWVm…（共 1095 字符）",
+    "decoded": {
+      "protocol": {
+        "out_trade_no": "SG_1793905716381_1b1299efd027",
+        "amount": "0.01",
+        "currency": "CNY",
+        "resource_id": "/api/v1/guide",
+        "pay_before": "2026-11-06T03:38:36+08:00",
+        "seller_signature": "bwh+xnquiBfNYuqAxNnKuf5CGwyowPELyEfW7wH/mihp3pdBcWYCNS4jgiFkGsqypM6oF5bB4wOuKV25OQZLJmw0wkwg5t9Q/V7CJgPTPzm6Rj0MM2h4/eNTSO75XZUQCDBLYbXhTaNeTeFIdYvQ4ZMAlhK0W83E+uYJXSGgFdhuxjF6zYSbcL8OyqAiWAQbBut2fsF5idjyFJmTjNWoffzcbsAd9aBm3/urmoC6sNiqinM6l0Vi3aW7yzULyytSeEDIGqBYUbCfnJLtS0Ena9RBEXjInrkknB6oH5w7UMGp6GFUcQqGwon2udgYgxbXUOmHUcqtXm5KnmMiZBlgjg==",
+        "seller_sign_type": "RSA2",
+        "seller_unique_id": "2088721118741530"
+      },
+      "method": {
+        "seller_name": "三维问路",
+        "seller_id": "2088721118741530",
+        "seller_app_id": "9021000171627759",
+        "goods_name": "单次导览 · 三维场景导览",
+        "seller_unique_id_key": "seller_id",
+        "service_id": "api_mock_service_id"
+      }
+    },
+    "body": {
+      "code": "Payment-Needed",
+      "message": "需要支付",
+      "out_trade_no": "SG_1793905716381_1b1299efd027",
+      "amount": "0.01",
+      "currency": "CNY",
+      "goods_name": "单次导览 · 三维场景导览"
+    }
+  },
+  "step2_payment": {
+    "cashierEndpoint": "http://aicashier.dl.alipaydev.com/openclawpay/agent/v1/pay",
+    "buyerCommands": [
+      "alipay-bot -- check-wallet",
+      "alipay-bot -- 402-buyer-pay -f 402_needed_<timestamp>.txt"
+    ],
+    "note": "Payment-Needed 头原样交给买方技能，不解码、不改动"
+  },
+  "step3_verify": {
+    "api": "alipay.aipay.agent.payment.verify",
+    "bizContent": {
+      "payment_proof": "<Payment-Proof.protocol.payment_proof，由支付宝 CLI 生成>",
+      "trade_no": "<Payment-Proof.protocol.trade_no，32 位纯数字>",
+      "client_session": "<Payment-Proof.method.client_session，原样透传，不得修改或缓存>"
+    },
+    "checks": [
+      "active == true",
+      "amount 一致",
+      "out_trade_no 一致",
+      "resource_id 一致",
+      "trade_no 未重复履约"
+    ]
+  },
+  "step4_fulfillment": {
+    "api": "alipay.aipay.agent.fulfillment.confirm",
+    "bizContent": {
+      "trade_no": "<支付宝交易号>"
+    },
+    "note": "履约回执失败时不得返回成功交付，应保留资源允许同一笔 Payment-Proof 重试"
+  },
+  "step5_delivery": {
+    "status": 200,
+    "headerName": "Payment-Validation",
+    "headerValuePreview": "eyJ0cmFkZV9ubyI6IjIwMjYxMTA2MDA4MjgxMDMwODA0MjgwMDAwMDIxNDIxIiwib3V0X3Ry…（共 188 字符）",
+    "body": {
+      "resource_id": "/api/v1/guide",
+      "content": {
+        "ok": true,
+        "scene": {
+          "id": "zjgsu-xiasha",
+          "name": "浙江工商大学下沙校区",
+          "description": "基于 OpenStreetMap 生成的真实场景（134 个命名点位 / 597 条路网边）"
+        },
+        "query": "从A教学楼到C教学楼怎么走",
+        "intent": "route",
+        "candidates": [
+          {
+            "id": "poi_way_563534009",
+            "name": "C教学楼",
+            "type": "building",
+            "matched": "C教学楼"
+          },
+          {
+            "id": "poi_way_563534011",
+            "name": "A教学楼",
+            "type": "building",
+            "matched": "A教学楼"
+          },
+          {
+            "id": "poi_way_887903995",
+            "name": "教学楼",
+            "type": "building",
+            "matched": "教学楼"
+          }
+        ],
+        "answer": "从A教学楼出发，沿园区步道直达，到达C教学楼，全程约 142 米，步行约 2 分钟。",
+        "route": {
+          "type": "walkway",
+          "measured": true,
+          "from": {
+            "id": "poi_way_563534011",
+            "name": "A教学楼",
+            "type": "building",
+            "type_label": "建筑",
+            "floor": null,
+            "xy": [
+              1495,
+              753
+            ],
+            "lonlat": [
+              120.3875641,
+              30.3117338
+            ]
+          },
+          "to": {
+            "id": "poi_way_563534009",
+            "name": "C教学楼",
+            "type": "building",
+            "type_label": "建筑",
+            "floor": null,
+            "xy": [
+              1461,
+              835
+            ],
+            "lonlat": [
+              120.3872153,
+              30.3124761
+            ]
+          },
+          "points": [
+            {
+              "id": "poi_way_563534009",
+              "name": "C教学楼",
+              "type": "building",
+              "type_label": "建筑",
+              "floor": null,
+              "xy": [
+                1461,
+                835
+              ],
+              "lonlat": [
+                120.3872153,
+                30.3124761
+              ]
+            }
+          ],
+          "polyline": [
+            [
+              1457,
+              770
+            ],
+            [
+              1441,
+              770
+            ],
+            [
+              1440,
+              819
+            ],
+            [
+              1457,
+              819
+            ],
+            [
+              1461,
+              835
+            ]
+          ],
+          "steps": [
+            {
+              "from": "poi_way_563534011",
+              "to": "w_247",
+              "kind": "path",
+              "cost_m": 41
+            },
+            {
+              "from": "w_247",
+              "to": "w_251",
+              "kind": "pedestrian",
+              "cost_m": 17
+            },
+            {
+              "from": "w_251",
+              "to": "w_250",
+              "kind": "pedestrian",
+              "cost_m": 49
+            },
+            {
+              "from": "w_250",
+              "to": "w_252",
+              "kind": "pedestrian",
+              "cost_m": 18
+            },
+            {
+              "from": "w_252",
+              "to": "poi_way_563534009",
+              "kind": "path",
+              "cost_m": 17
+            }
+          ],
+          "distance_m": 142,
+          "eta_min": 2
+        },
+        "pois": [
+          {
+            "id": "poi_way_563534009",
+            "name": "C教学楼",
+            "type": "building",
+            "type_label": "建筑",
+            "floor": null,
+            "xy": [
+              1461,
+              835
+            ],
+            "lonlat": [
+              120.3872153,
+              30.3124761
+            ]
+          }
+        ],
+        "evidence": {
+          "source": "scene-graph",
+          "sceneId": "zjgsu-xiasha",
+          "nodeCount": 593,
+          "edgeCount": 597,
+          "geometryHash": "sha256:628603172dbf29381478849caf52cd91"
+        },
+        "billing": {
+          "guide_call": "1 次",
+          "tokens": "858 token",
+          "distance_m": "142 米",
+          "poi_count": "1 个"
+        }
+      },
+      "trade_no": "20261106008281030804280000021421",
+      "out_trade_no": "SG_1793905716403_168aba273e8c",
+      "already_fulfilled": false,
+      "fulfillment_confirmed": true,
+      "content_preview": {
+        "ok": true,
+        "scene": {
+          "id": "zjgsu-xiasha",
+          "name": "浙江工商大学下沙校区",
+          "description": "基于 OpenStreetMap 生成的真实场景（134 个命名点位 / 597 条路网边）"
+        },
+        "query": "从A教学楼到C教学楼怎么走",
+        "intent": "route",
+        "candidates": [
+          {
+            "id": "poi_way_563534009",
+            "name": "C教学楼",
+            "type": "building",
+            "matched": "C教学楼"
+          },
+          {
+            "id": "poi_way_563534011",
+            "name": "A教学楼",
+            "type": "building",
+            "matched": "A教学楼"
+          },
+          {
+            "id": "poi_way_887903995",
+            "name": "教学楼",
+            "type": "building",
+            "matched": "教学楼"
+          }
+        ],
+        "answer": "从A教学楼出发，沿园区步道直达，到达C教学楼，全程约 142 米，步行约 2 分钟。",
+        "route": {
+          "type": "walkway",
+          "measured": true,
+          "from": {
+            "id": "poi_way_563534011",
+            "name": "A教学楼",
+            "type": "building",
+            "type_label": "建筑",
+            "floor": null,
+            "xy": [
+              1495,
+              753
+            ],
+            "lonlat": [
+              120.3875641,
+              30.3117338
+            ]
+          },
+          "to": {
+            "id": "poi_way_563534009",
+            "name": "C教学楼",
+            "type": "building",
+            "type_label": "建筑",
+            "floor": null,
+            "xy": [
+              1461,
+              835
+            ],
+            "lonlat": [
+              120.3872153,
+              30.3124761
+            ]
+          },
+          "points": [
+            {
+              "id": "poi_way_563534009",
+              "name": "C教学楼",
+              "type": "building",
+              "type_label": "建筑",
+              "floor": null,
+              "xy": [
+                1461,
+                835
+              ],
+              "lonlat": [
+                120.3872153,
+                30.3124761
+              ]
+            }
+          ],
+          "polyline": [
+            [
+              1457,
+              770
+            ],
+            [
+              1441,
+              770
+            ],
+            [
+              1440,
+              819
+            ],
+            [
+              1457,
+              819
+            ],
+            [
+              1461,
+              835
+            ]
+          ],
+          "steps": [
+            {
+              "from": "poi_way_563534011",
+              "to": "w_247",
+              "kind": "path",
+              "cost_m": 41
+            },
+            {
+              "from": "w_247",
+              "to": "w_251",
+              "kind": "pedestrian",
+              "cost_m": 17
+            },
+            {
+              "from": "w_251",
+              "to": "w_250",
+              "kind": "pedestrian",
+              "cost_m": 49
+            },
+            {
+              "from": "w_250",
+              "to": "w_252",
+              "kind": "pedestrian",
+              "cost_m": 18
+            },
+            {
+              "from": "w_252",
+              "to": "poi_way_563534009",
+              "kind": "path",
+              "cost_m": 17
+            }
+          ],
+          "distance_m": 142,
+          "eta_min": 2
+        },
+        "pois": [
+          {
+            "id": "poi_way_563534009",
+            "name": "C教学楼",
+            "type": "building",
+            "type_label": "建筑",
+            "floor": null,
+            "xy": [
+              1461,
+              835
+            ],
+            "lonlat": [
+              120.3872153,
+              30.3124761
+            ]
+          }
+        ],
+        "evidence": {
+          "source": "scene-graph",
+          "sceneId": "zjgsu-xiasha",
+          "nodeCount": 593,
+          "edgeCount": 597,
+          "geometryHash": "sha256:628603172dbf29381478849caf52cd91"
+        },
+        "billing": {
+          "guide_call": "1 次",
+          "tokens": "858 token",
+          "distance_m": "142 米",
+          "poi_count": "1 个"
+        }
+      }
+    }
+  },
+  "order": {
+    "tradeNo": "20261106008281030804280000021421",
+    "payUrl": "https://render.alipay.com/p/yuyan/180020010001290755/pay.html?schema=alipays%3A%2F%2Fplatformapi%2FstartApp%3FappId%3D20000125%26orderSuffix%3Dtrade_no%253D2026110622001404280508838870%2526cashier_scene%253DopenClaw%2526external_agent_id%253DQUdFTlRfREVCVUc%253D%2526safeNodeId%253DSAFE_NODE_DEBUG%2526aiPayType%253DmoveToMobile%2526agentId%253DQUdFTlRfREVCVUc%253D"
+  }
+}

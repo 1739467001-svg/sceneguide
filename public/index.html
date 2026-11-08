@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="no-js">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>三维问路 SceneGuide · 可被 Agent 自动购买的场景导览服务 | PAYATHON 2026</title>
+<meta name="description" content="三维问路 SceneGuide —— 基于真实 OpenStreetMap 地理拓扑的场景导览服务，通过支付宝 A2M 智能收（HTTP 402）按量计费。Agent 可自行发现服务、完成支付并获取可核验的导览结果。参赛项目：PAYATHON 2026 · AI 付黑客松。" />
+<meta name="theme-color" content="#070b16" />
+<meta property="og:title" content="三维问路 SceneGuide · 可被 Agent 自动购买的场景导览服务" />
+<meta property="og:description" content="基于真实地理拓扑的场景导览服务。Agent 自行完成支付，按次计费，用量可核验。" />
+<meta property="og:type" content="website" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%232f7bff'/%3E%3Ctext x='16' y='22' font-size='16' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'%3E三%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="styles.css?v=20261108-live11" />
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="theme-color" content="#070b16" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="三维问路" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<meta property="og:image" content="assets/og.png" />
+<meta name="twitter:card" content="summary_large_image" />
+</head>
+<body>
+<a class="skip-link" href="#main">跳到主要内容</a>
+
+<!-- ══════════════════════════ 导航 ══════════════════════════ -->
+<nav class="nav" id="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top">
+      <span class="brand-mark">三</span>
+      <span>三维问路<span class="brand-sub"> / SceneGuide</span></span>
+    </a>
+    <div class="nav-links">
+      <a href="#demo">实时演示</a>
+      <a href="#protocol">支付链路</a>
+      <a href="#deliverables">交付验收</a>
+      <a href="#tracks">赛道契合</a>
+      <a href="#pricing">商业化</a>
+      <a href="#wall">社区反馈</a>
+      <a href="#api">API 参考</a>
+      <a href="#engineering">工程细节</a>
+      <a href="#about">关于</a>
+      <a href="#demo" class="nav-cta">立即体验</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ══════════════════════════ Hero ══════════════════════════ -->
+<main id="main">
+<header class="hero" id="top">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="contest-badge">
+        <span class="dot"></span>
+        <b>PAYATHON 2026</b> · 支付宝 AI 付黑客松
+        <span class="tag blue">Vibe Pay</span>
+        <span class="tag cyan">Machine Pay</span>
+        <span class="tag violet">Skill Pay</span>
+      </span>
+
+      <h1>
+        <span>三维问路</span>
+        <span class="grad">能被 Agent 自动购买的<br />三维场景导览服务</span>
+      </h1>
+
+      <p class="hero-sub">
+        路线与点位来自 <b>真实 OpenStreetMap 地理拓扑</b>，不是大模型编的。
+        消费者 Agent 可以自行发现这个服务、<b>自行完成支付</b>，然后拿到带几何哈希、可核验的导览答案。
+      </p>
+
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="#demo">立即体验真实链路 ↓</a>
+        <a class="btn btn-ghost" href="#protocol">看支付协议报文</a>
+      </div>
+
+      <div class="hero-stats" id="heroStats">
+        <div class="hero-stat"><div class="k">真实地标</div><div class="v num" data-stat="pois">—</div></div>
+        <div class="hero-stat"><div class="k">拓扑节点 / 边</div><div class="v num" data-stat="graph">—</div></div>
+        <div class="hero-stat"><div class="k">已支付订单</div><div class="v num" data-stat="paid">—</div></div>
+        <div class="hero-stat"><div class="k">个人开发者费率</div><div class="v num">0<small>% 至 12.31</small></div></div>
+      </div>
+    </div>
+
+    <!-- 真实协议终端：内容由 /data/protocol-trace.json 填充 -->
+    <div class="terminal reveal in" aria-label="真实 402 协议往返报文">
+      <div class="term-bar">
+        <span class="term-dots"><i></i><i></i><i></i></span>
+        <span class="term-title">scene-guide · A2M 402 协议实测</span>
+      </div>
+      <div class="term-body" id="termBody">载入报文…</div>
+      <div class="term-foot" id="termFoot"></div>
+    </div>
+  </div>
+</header>
+
+<!-- ══════════════════════════ 差异 ══════════════════════════ -->
+<section id="why">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="eyebrow">问题</span>
+      <h2>通用大模型答不了「从图书馆到行政楼怎么走」</h2>
+      <p>
+        不是因为它不聪明，而是因为它<b>没有地理拓扑</b>。模型可以编出一段听起来合理的描述，
+        但无法保证「390 米」「途经中心广场」「5.4 分钟」这三个数字同时成立。
+      </p>
+    </div>
+
+    <div class="panel reveal">
+      <table class="cmp">
+        <thead>
+          <tr><th>能力</th><th>通用 LLM / 地图 App</th><th>三维问路 SceneGuide</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>路线是否可核验</td>
+            <td><span class="x">✕ 生成式描述，可能与实地不符</span></td>
+            <td><span class="v">✓ 拓扑计算 + 几何哈希</span></td>
+          </tr>
+          <tr>
+            <td>结论的证据</td>
+            <td><span class="x">✕ 无可追溯来源</span></td>
+            <td><span class="v">✓ <code>geometryHash</code> 可复算</span></td>
+          </tr>
+          <tr>
+            <td>被 Agent 直接调用</td>
+            <td><span class="x">✕ 面向人的界面</span></td>
+            <td><span class="v">✓ 402 协议，Agent 自行支付</span></td>
+          </tr>
+          <tr>
+            <td>用量与计费</td>
+            <td><span class="x">✕ 无计量</span></td>
+            <td><span class="v">✓ 调用次数 / token / 路径长度三维度留痕</span></td>
+          </tr>
+          <tr>
+            <td>不确定性表达</td>
+            <td><span class="x">✕ 语气确定，内容可能是错的</span></td>
+            <td><span class="v">✓ 明确标注「实测步道」或「直距估算」</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 实时演示 ══════════════════════════ -->
+<section id="demo">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="eyebrow">实时演示</span>
+      <h2>下面这一整块是可以真的用的</h2>
+      <p>
+        不是录屏，也不是截图。输入问题会真实发起一次 <code>GET /api/v1/guide</code>，
+        收到 <code>402 Payment-Needed</code>，完成支付后拿到资源。
+        沙箱环境下点一下即可完成支付宝沙箱收银，走的是<b>真实的支付接口</b>。
+        <br />
+        默认是<b>三维场景</b>：113 栋建筑的体块由 OpenStreetMap 的真实多边形轮廓拉伸而成，
+        路线在三维空间里走。可切到拓扑平面图看路网与地标分布。
+      </p>
+    </div>
+
+    <div class="demo-grid reveal">
+      <div>
+        <div class="canvas-shell">
+          <div class="skeleton" id="mapSkeleton">
+            <div class="skeleton-inner">
+              <div class="skeleton-bar"></div>
+              <div class="skeleton-text" id="skeletonText">正在加载三维场景…</div>
+            </div>
+          </div>
+          <canvas id="map3d" aria-label="三维场景渲染（OpenStreetMap 建筑轮廓拉伸）" hidden></canvas>
+          <canvas id="map" aria-label="场景路网与地标二维拓扑图"></canvas>
+          <div class="canvas-overlay">
+            <span class="tag cyan" id="sceneTag">场景加载中…</span>
+            <span class="tag" id="srcTag"></span>
+          </div>
+          <div class="canvas-legend">
+            <span><i style="background:#4d8dff"></i>建筑</span>
+            <span><i style="background:#22d3a6"></i>设施</span>
+            <span><i style="background:#22d3a6;width:14px;height:3px;border-radius:2px"></i>路线</span>
+            <span id="scaleNote" hidden>建筑高度夸张 ×3.0</span>
+          </div>
+        </div>
+        <div class="view-switch" role="group" aria-label="视图切换">
+          <button type="button" data-view="3d" class="active">三维场景</button>
+          <button type="button" data-view="2d">拓扑平面图</button>
+          <button type="button" id="resetView" class="ghost">重置视角</button>
+          <span class="view-hint" id="viewHint">左键旋转 · 右键平移 · 滚轮缩放</span>
+        </div>
+
+        <div class="mode-row">
+          <div class="seg" id="modeSeg" role="group" aria-label="交付模式">
+            <button type="button" data-mode="guide" class="active">导览问答 · ¥0.50</button>
+            <button type="button" data-mode="quest">研学任务 · ¥9.90</button>
+          </div>
+          <select id="tierSel" aria-label="购买档位"></select>
+          <select id="levelSel" aria-label="任务难度" hidden>
+            <option value="easy">简单</option>
+            <option value="normal" selected>普通</option>
+            <option value="hard">困难</option>
+          </select>
+          <span class="mode-hint" id="modeHint"></span>
+        </div>
+        <div class="ask">
+          <input id="q" type="text" autocomplete="off" spellcheck="false"
+                 placeholder="例如：从A教学楼到C教学楼怎么走" />
+          <button class="btn btn-primary" id="askBtn">查询路线</button>
+          <button class="btn btn-ghost" id="previewBtn" title="每天 3 次免费试看">免费试看</button>
+          <button class="btn btn-ghost" id="shareBtn" title="分享链接（带你的渠道归因）">分享</button>
+        </div>
+        <div class="chips" id="chips"></div>
+      </div>
+
+      <div>
+        <div class="panel panel-tight" id="entPanel" style="margin-bottom:14px">
+          <div style="font-size:12px;color:var(--text-faint);letter-spacing:.05em;text-transform:uppercase;margin-bottom:10px">我的权益额度</div>
+          <div id="entBody"><div class="skeleton-text">加载中…</div></div>
+        </div>
+        <div class="panel panel-tight" style="margin-bottom:14px">
+          <div style="font-size:12px;color:var(--text-faint);letter-spacing:.05em;text-transform:uppercase;margin-bottom:10px">服务档位</div>
+          <table class="data" id="tierTable"><tbody></tbody></table>
+        </div>
+        <div class="panel panel-tight">
+          <div style="font-size:12px;color:var(--text-faint);letter-spacing:.05em;text-transform:uppercase;margin-bottom:10px">实时订单与用量</div>
+          <table class="data" id="statsTable"><tbody></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <div class="result reveal" id="result">
+      <div class="result-empty"><span class="spinner" style="animation:none;opacity:.4"></span>正在初始化场景与路由…</div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 交付与验收 ══════════════════════════ -->
+<section id="deliverables">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="eyebrow">交付与验收</span>
+      <h2>我提交什么，以及你怎么自己验证</h2>
+      <p>
+        四条赛道各一份提交物，共用同一个场景内核。下面每一项都可以由你独立执行与复算，
+        <b>不需要相信这个页面上的任何描述</b>。
+      </p>
+    </div>
+
+    <div class="grid g4 reveal" id="deliverCards"></div>
+
+    <div class="grid split-grid reveal" style="margin-top:18px;align-items:start">
+      <div class="panel">
+        <h3 style="font-size:15px;margin-bottom:16px">验收清单 · 可自行执行</h3>
+        <ol class="verify-list" id="verifyList"></ol>
+      </div>
+
+      <div class="panel">
+        <h3 style="font-size:15px;margin-bottom:6px">一键跑完上面所有验收</h3>
+        <p style="font-size:13px;color:var(--text-dim);margin-bottom:14px">
+          验收脚本随作品一起交付。它会真的发起支付、真的查订单状态、真的解码协议头——
+          右侧输出为 <b>2026-11-06 真实运行捕获</b>（39 项，含打卡闭环与增长归因）。
+        </p>
+        <div class="codeblock">
+          <div class="codeblock-head"><span>scripts/verify.sh</span>
+            <button class="copy-btn" data-copy="#verifyCode">复制</button></div>
+          <pre id="verifyCode"><code>三维问路 · SceneGuide 验收
+目标：http://127.0.0.1:3000
+
+▸ 0. 服务可达性
+  ✓ GET /healthz → 200
+
+▸ 1. 付费资源返回 402 支付挑战
+  ✓ 状态码 402 Payment Required
+  ✓ 响应头含 Payment-Needed
+  ✓ Payment-Needed 可解码（out_trade_no=SG_1793985165709_ee622cdeda2e amount=0.01 service_id=api_mock_service_id seller_id=2088721118741530）
+
+▸ 2. 完成支付并交付资源
+  ✓ 支付完成，支付宝交易号 20261107008281011204280000022439（32 位）
+  ✓ 交付内容含导览答案
+
+▸ 3. 幂等履约
+  ✓ 订单状态 PAID/FULFILLED（重复请求不会重复生成资源）
+
+▸ 4. 用量计量
+  ✓ 计量维度 guide_call 有累计
+  ✓ 计量维度 tokens 有累计
+  ✓ 计量维度 distance_m 有累计
+
+▸ 5. 场景数据与可核验性
+  ✓ 命名地标 134 个（OSM 真实数据）
+  ✓ 建筑多边形轮廓 113 个（可拉伸为体块）
+  ✓ 标注了 OSM 版权归属（ODbL）
+
+▸ 6. 站点协议报文快照
+  ✓ protocol-trace.json 可访问（真实抓取的 402 往返报文）
+
+▸ 7. Agent 发现服务（MCP tools/list）
+  ✓ MCP tools/list 返回 scene_guide（Agent 可发现）
+  ✓ MCP 同时暴露 scene_guide_scenes（先选场景再问路）
+  ✓ 工具标注 paid=true（Agent 宿主可提示计费）
+
+▸ 8. 场景任务（研学档位）
+  ✓ 任务生成：线索链与打卡点一一对应，完成前状态为进行中且无证书
+  ✓ 任务走真实支付：交易号 20261107008281011204280000022440
+  ✓ 任务计量含 clue_count 维度
+  ✓ 非法打卡被拒（UNKNOWN_POINT）——顺序核验生效
+  ✓ 按序打卡 3 站后颁发证书：sha256:d483be2d5e05d7625c53441a08c80eb2
+  ✓ 未完成时不含证书——证书只在走完之后颁发
+
+▸ 9. 增长归因与免费试看
+  ✓ 渠道访问 /?ref=verify-1793985170（首触归因）
+  ✓ 免费试看前 3 次放行
+  ✓ 第 4 次被限流（429）——服务端计数生效
+  ✓ 漏斗看板含该渠道
+  ✓ 反刷量口径：自测付费单独标注（15 笔）
+
+▸ 10. 站点完整性
+  ✓ GET / → 200
+  ✓ GET /styles.css → 200
+  ✓ GET /app.js → 200
+  ✓ GET /three-scene.js → 200
+  ✓ GET /vendor/three.module.js → 200
+  ✓ GET /data/api-reference.json → 200
+  ✓ GET /manifest.webmanifest → 200
+  ✓ GET /sw.js → 200
+  ✓ GET /icon-192.png → 200
+  ✓ GET /icon-512.png → 200
+  ✓ GET /404.html → 200
+
+────────────────────────────────────────────────────────
+全部通过：39 项</code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 支付链路 ══════════════════════════ -->
+<section id="protocol">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="eyebrow">赛道核心</span>
+      <h2>支付不是一个按钮<br />而是一整条可核验的协议链路</h2>
+      <p>
+        本作品使用支付宝 <b>A2M 智能收（HTTP 402）</b>：商家返回支付挑战，付款方带着凭证重试，
+        商家校验后交付并回执。下面每一步展开都是<b>本系统真实抓取过的报文</b>。
+      </p>
+    </div>
+
+    <div class="grid proto-grid reveal" style="align-items:start">
+      <div class="steps" id="steps"></div>
+
+      <div class="panel" style="position:sticky;top:84px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px">
+          <strong style="font-size:14px">真实报文</strong>
+          <span class="tag" id="traceTag">加载中…</span>
+        </div>
+        <div id="traceView"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 交易链路全貌 ══════════════════════════ -->
+<section id="transaction">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="eyebrow">Agent Pay · 交易链路全貌</span>
+      <h2>发现 → 支付 → 交付 → 结算，一环不缺</h2>
+      <p>
+        Agent Pay 赛道的官方描述是「探索 Agent <b>发现服务</b>、<b>发起支付</b>与<b>获得交付</b>的新型交易链路」。
+        下面把这句话拆成四环，每环给出可运行的证据——第一环是本页实时调用 MCP 端点得到的。
+      </p>
+    </div>
+
+    <div class="chain reveal" id="chain"></div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 赛道契合 ══════════════════════════ -->
+<section id="tracks">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="eyebrow">赛道契合</span>
+      <h2>一个内核，四份提交物，对应四条赛道</h2>
+      <p>
+        下列赛道描述为 PAYATHON 2026 官方原文。同一套场景内核按不同交付形态打包，
+        分别投不同赛道——它们是四种交付物，不是一份物料换四个赛道。
+      </p>
+      <p style="margin-top:14px;padding:14px 16px;border-radius:10px;background:var(--surface);border:1px solid var(--border);font-size:14px">
+        <b style="color:var(--text)">为什么这样分配：</b>
+        <b>Machine Pay 是主赛道</b>——本作品对支付宝 A2M 智能收（HTTP 402）的接入做到了官方产品级：
+        402 挑战、凭证验签、履约回执全部在官方沙箱端到端跑通，这是四条线里实现最完整的一条；
+        Vibe Pay 以网页应用形态作为<b>主展示面</b>（评委能直接操作的部分）；
+        Skill Pay 与 Agent Pay 各补一份形态，让同一条能力在不同交付面上都可被调用。
+        同一赛道内最多一个作品获奖，所以资源集中在这一个内核上。
+      </p>
+    </div>
+    <div class="grid g4" id="trackCards"></div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 商业化 ══════════════════════════ -->
+<section id="pricing">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="eyebrow">商业化</span>
+      <h2>按量计费，用量可核验<br />这是 Vibe Pay 说的「可经营」</h2>
+      <p>
+        官方按量付费接口<b>不提供自动 token 计量</b>，计量由商家服务端自行完成。
+        这一层自己建，也是本项目里最能写进简历的工程增量。
+      </p>
+    </div>
+
+    <div class="grid g2 reveal" style="align-items:start">
+      <div class="panel">
+        <h3 style="font-size:15px;margin-bottom:14px">计费口径</h3>
+        <table class="data">
+          <thead><tr><th>计量项</th><th>单位</th><th class="n">含义</th></tr></thead>
+          <tbody>
+            <tr><td><code>guide_call</code></td><td>call</td><td class="n">导览调用次数</td></tr>
+            <tr><td><code>tokens</code></td><td>token</td><td class="n">模型 token 消耗</td></tr>
+            <tr><td><code>distance_m</code></td><td>m</td><td class="n">规划路径总长度</td></tr>
+            <tr><td><code>poi_count</code></td><td>poi</td><td class="n">返回点位数量</td></tr>
+            <tr><td><code>clue_count</code></td><td>clue</td><td class="n">任务线索条数</td></tr>
+          </tbody>
+        </table>
+        <div class="notice notice-blue" style="margin-top:16px">
+          平台硬约束：<b>服务市场注册价必须等于实际扣费金额</b>，否则收银接口返回
+          <code>SERVICE_PRICE_MISMATCH</code> 直接拒单。因此每个档位独立注册为独立服务，
+          同档位内金额恒定，<b>计量只记录、不参与扣费</b>。
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3 style="font-size:15px;margin-bottom:14px">可交付的两种商品</h3>
+        <div class="feature" style="margin-bottom:12px">
+          <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px">
+            <h4 style="margin:0">单次导览</h4>
+            <span class="tag cyan">按次</span>
+          </div>
+          <p>一次问答式的场景导览。<b>低门槛、可冲动消费</b>，适合 Agent 高频调用。</p>
+        </div>
+        <div class="feature">
+          <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px">
+            <h4 style="margin:0">场景任务</h4>
+            <span class="tag amber">可交付的教育产品</span>
+          </div>
+          <p>
+            线索链 → 途经站点 → 评分规则 → 带几何哈希的完成凭证。
+            <b>一次任务是一个可交付物</b>，家长与研学机构为它付费的意愿远高于为一次查询付费。
+          </p>
+        </div>
+        <div class="notice notice-cyan" style="margin-top:14px">
+          结算：默认进入签约账号支付宝余额账户，<b>实时到账</b>；
+          新签约收单产品未满 90 日或连续交易未满 30 日的，次日结算。平台<b>零抽成</b>。
+        </div>
+      </div>
+    </div>
+
+    <div class="panel reveal" style="margin-top:18px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+        <h3 style="font-size:15px;margin:0">渠道转化看板 · 真实访客归因</h3>
+        <span class="tag cyan" id="funnelTag">加载中…</span>
+      </div>
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:14px">
+        每个访客一个随机 cookie（不存任何个人信息，IP 只存加盐哈希），
+        首触渠道归因；每笔订单关联访客与来源。
+        <b>反刷量口径</b>：来源为 <code>demo</code> 的是沙箱自测代付，永远不计入「真实付费用户」；
+        只有外部 API 调用（source=api）的已支付订单才计入。
+      </p>
+      <table class="data" id="funnelTable">
+        <thead><tr>
+          <th>渠道</th><th class="n">访客</th><th class="n">试看</th>
+          <th class="n">发起支付</th><th class="n">付费</th><th class="n">其中真实</th>
+          <th class="n">收入</th><th class="n">转化率</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+      <p style="font-size:12px;color:var(--text-faint);margin-top:10px" id="funnelNote"></p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 社区反馈 ══════════════════════════ -->
+<section id="wall">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="eyebrow">社区反馈</span>
+      <h2>用过的人，在这里说两句</h2>
+      <p>
+        这一栏不是装饰——它就是本站的<b>反馈收集口</b>。
+        评审维度「作品影响力：是否获得用户的有效点赞、评论和交流反馈」需要真实互动，
+        所以站点必须有一个地方让访客<b>真的能留言、能点赞</b>，而不是只在文案里承诺。
+        <br />
+        墙上只出现真实提交的内容：<b>不预置任何示例评论</b>，空墙就是空墙。
+      </p>
+    </div>
+
+    <div class="grid g2 reveal" style="align-items:start">
+      <div class="panel">
+        <h3 style="font-size:15px;margin-bottom:6px">留下你的反馈</h3>
+        <p style="font-size:12.5px;color:var(--text-faint);margin-bottom:14px">
+          称呼与身份都是自愿填写的；服务器只存加盐后的 IP 哈希，不存 IP 原文、不存任何联系方式。
+          每人每天最多 3 条反馈，点赞按访客去重。
+        </p>
+        <form id="fbForm" autocomplete="off">
+          <div class="fb-row">
+            <input id="fbName" type="text" maxlength="24" placeholder="称呼（如：小明 / 某某研学机构）" />
+            <select id="fbRole" aria-label="你的身份">
+              <option value="">身份（可选）</option>
+              <option value="游客">游客</option>
+              <option value="研学机构">研学机构</option>
+              <option value="开发者">开发者</option>
+              <option value="学生">学生</option>
+              <option value="评审">评审</option>
+              <option value="其他">其他</option>
+            </select>
+          </div>
+          <div class="fb-rating" id="fbRating" role="group" aria-label="评分">
+            <span style="font-size:12.5px;color:var(--text-dim);margin-right:4px">评分（可选）</span>
+            <button type="button" data-star="1">★</button>
+            <button type="button" data-star="2">★</button>
+            <button type="button" data-star="3">★</button>
+            <button type="button" data-star="4">★</button>
+            <button type="button" data-star="5">★</button>
+            <span class="fb-star-note" id="fbStarNote">未评分</span>
+          </div>
+          <textarea id="fbContent" rows="4" maxlength="500"
+                    placeholder="说点具体的：哪一步好用？哪里卡住了？路线对不对？"></textarea>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <button class="btn btn-primary" type="submit" id="fbSubmit">发布反馈</button>
+            <span style="font-size:12px;color:var(--text-faint)" id="fbNote"></span>
+          </div>
+        </form>
+      </div>
+
+      <div class="panel">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px">
+          <h3 style="font-size:15px;margin:0">反馈墙</h3>
+          <span class="tag cyan" id="fbCount">加载中…</span>
+        </div>
+        <div id="fbList"><div class="skeleton-text">加载中…</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ Agent 接入 ══════════════════════════ -->
+<section id="agent">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="eyebrow">Agent 原生</span>
+      <h2>接入方不需要懂支付，它只需要会调接口</h2>
+      <p>
+        商家把能力封装成一份 <code>SKILL.md</code>。买方 Agent 收到 402 之后，
+        把报文原样交给支付宝官方的 <code>alipay-pay-for-402-service</code> 技能，
+        由它引导用户完成付款并携凭证重试。
+      </p>
+    </div>
+
+    <div class="grid g2 reveal" style="align-items:start">
+      <div class="codeblock">
+        <div class="codeblock-head"><span>SKILL.md · 商家技能</span>
+          <button class="copy-btn" data-copy="#skillCode">复制</button></div>
+        <pre id="skillCode"><code>---
+name: scene-guide
+description: 当用户询问某个具体场所（校园、园区、景区、展馆）内的位置、
+  路线或设施分布时，调用此技能获取基于真实场景拓扑验证过的导览答案。
+---
+
+## 第一步：请求资源
+curl -v "https://&lt;服务域名&gt;/api/v1/guide?scene=&lt;场景ID&gt;&amp;query=&lt;问题&gt;"
+
+## 第二步：处理 402 响应
+你将收到一个**状态码为 402 的响应报文，其中包含 `Payment-Needed` 响应头**。
+此时你需要将**整个 402 响应报文**传递给支付宝的
+**`alipay-pay-for-402-service`** 技能，引导用户完成付款。
+
+## 第三步：交付
+付款完成后，携带 `Payment-Proof` 重试原请求，得到 HTTP 200 与
+`Payment-Validation` 响应头。</code></pre>
+      </div>
+
+      <div class="codeblock">
+        <div class="codeblock-head"><span>买方 Agent 的支付流程</span>
+          <button class="copy-btn" data-copy="#cliCode">复制</button></div>
+        <pre id="cliCode"><code># 0. 检查 AI 钱包是否就绪
+alipay-bot -- check-wallet
+#   code=200 &amp; access_url 为空  → 已就绪
+#   code=200 &amp; access_url 非空  → 先调用 alipay-authenticate-wallet
+#   code=500                   → 不可用，停止
+
+# 1. 原样保存 Payment-Needed 响应头（base64，不要解码、不要改动）
+curl -s -D - -o /dev/null &lt;resource-url&gt; \
+  | grep -i "^Payment-Needed:" \
+  | sed "s/^[Pp]ayment-[Nn]eeded: //" \
+  | tr -d "\r\n" &gt; 402_needed_&lt;timestamp&gt;.txt
+
+# 2. 发起支付 —— CLI 输出需原样透传给用户
+alipay-bot -- 402-buyer-pay -f '402_needed_&lt;timestamp&gt;.txt'
+
+# 3. 用户支付完成后，携带凭证重试原始请求
+alipay-bot 402-query-payment-status \
+  -t '&lt;32位tradeNo&gt;' -r '&lt;resource-url&gt;' \
+  [-m '&lt;GET|POST&gt;'] [-d '&lt;data&gt;'] [-H '&lt;key:value&gt;']
+
+# 4. 发送履约回执
+alipay-bot -- 402-buyer-fulfillment-ack -t '&lt;32位tradeNo&gt;'</code></pre>
+      </div>
+    </div>
+
+    <div class="grid g3 reveal" style="margin-top:18px">
+      <div class="feature">
+        <div class="ico">◈</div>
+        <h4>零改动接入</h4>
+        <p>安装官方 <code>@alipay/agent-payment</code> 后，<code>alipay-bot</code> 提供全部支付动作，买方 Agent 不需要写任何签名逻辑。</p>
+      </div>
+      <div class="feature">
+        <div class="ico">◉</div>
+        <h4>凭证原样透传</h4>
+        <p><code>client_session</code> 必须原样透传给支付宝校验接口，不得修改、缓存或自行构造——这是校验能否通过的硬条件。</p>
+      </div>
+      <div class="feature">
+        <div class="ico">◆</div>
+        <h4>幂等交付</h4>
+        <p>资源只生成一次。履约回执失败时状态停在 <code>PENDING_CONFIRM</code>，允许同一笔凭证重试，不会重复交付、也不会重复消耗算力。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ API 参考 ══════════════════════════ -->
+<section id="api">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="eyebrow">API 参考</span>
+      <h2>六个端点，一份真实响应对照表</h2>
+      <p>
+        下面的响应示例是<b>从运行中的服务抓取的真实报文</b>，不是手写示意。
+        端点只实现按量付费所必需的三个接口（402 / verify / fulfill），其余都是只读查询。
+      </p>
+    </div>
+    <div class="grid api-grid reveal" id="apiCards" style="gap:16px"></div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 工程细节 ══════════════════════════ -->
+<section id="engineering">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="eyebrow">工程细节</span>
+      <h2>三个只有真正跑通才会撞到的坑</h2>
+      <p>
+        这些不是文档里写着的，是在本项目联调时实测踩出来并已修复的。
+        写在这里，是因为它们恰好决定了「能不能收到钱」。
+      </p>
+    </div>
+
+    <div class="grid g2 reveal" style="align-items:start">
+      <div class="panel">
+        <div class="gotcha">
+          <div class="n">1</div>
+          <div>
+            <h4>官网文档的 <code>Payment-Needed</code> 是扁平结构，实际是嵌套的</h4>
+            <p>官方对接文档把字段列成一张扁平表，照抄会被沙箱收银拒单。参考实现与买方技能实际使用 <code>{ protocol: {...}, method: {...} }</code> 两层结构。</p>
+            <div class="fix"><b>解法</b> 以参考实现为准，且<b>参与签名的字段是跨两层的扁平 8 个</b>（不含 <code>seller_signature</code> 自身）。</div>
+          </div>
+        </div>
+        <div class="gotcha">
+          <div class="n">2</div>
+          <div>
+            <h4>给 SDK 的私钥必须是 PKCS#1，不是 PKCS#8</h4>
+            <p>用 PKCS#8 会得到 <code>error:1E08010C:DECODER routines::unsupported</code>。因为 SDK 的 <code>formatKey()</code> 默认按 <code>RSA PRIVATE KEY</code> 剥离 PEM 标记，PKCS#8 的 <code>PRIVATE KEY</code> 匹配不上，最终产出嵌套 PEM 头。</p>
+            <div class="fix"><b>解法</b> Node/Python/Go/PHP 一律用沙箱配置里的 <code>appPrivatePkcsKey</code>（PKCS#1），Java 才用 <code>appPrivateKey</code>（PKCS#8）。</div>
+          </div>
+        </div>
+        <div class="gotcha">
+          <div class="n">3</div>
+          <div>
+            <h4>注册价与实付价不一致，收银直接拒单</h4>
+            <p>收银接口返回 <code>SERVICE_PRICE_MISMATCH：服务价格不匹配</code>，订单不会产生。</p>
+            <div class="fix"><b>解法</b> 每个档位注册成独立服务（各自 service_id 与注册价），同档位金额恒定；计量层只记录不参与扣费。</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3 style="font-size:15px;margin-bottom:14px">交付前的五项核验</h3>
+        <table class="data">
+          <thead><tr><th>检查项</th><th>不通过时</th></tr></thead>
+          <tbody>
+            <tr><td><code>active == true</code></td><td>凭证无效或已过期</td></tr>
+            <tr><td><code>amount</code> 与订单一致</td><td>拒绝履约</td></tr>
+            <tr><td><code>out_trade_no</code> 与订单一致</td><td>拒绝履约</td></tr>
+            <tr><td><code>resource_id</code> 与本次资源一致</td><td>拒绝履约</td></tr>
+            <tr><td><code>trade_no</code> 未重复履约</td><td>拒绝履约（幂等保护）</td></tr>
+          </tbody>
+        </table>
+        <div class="notice notice-cyan" style="margin-top:16px">
+          订单在返回 402 <b>之前</b>落库（SQLite + 唯一约束 + 事务），
+          否则付款后验付能过、却查不到本地订单，直接 <code>ORDER_NOT_FOUND</code>。
+        </div>
+        <div class="codeblock" style="margin-top:16px">
+          <div class="codeblock-head"><span>订单状态机</span></div>
+          <pre><code>order_status  : PENDING_PAYMENT ──► PAID
+fulfill_status: UNFULFILLED ──► PENDING_CONFIRM ──► FULFILLED
+                          ▲                    │
+                          └── 资源生成失败回退 ─┘
+                              （允许重试，不重复交付）</code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 数据可核验 ══════════════════════════ -->
+<section id="data">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="eyebrow">数据</span>
+      <h2>场景数据从哪来，怎么复算</h2>
+      <p>
+        场景不是手工摆的示意图，而是由脚本从 OpenStreetMap 拉取、缝合、吸附生成的产物，
+        构建过程可复现，结论可复算。
+      </p>
+    </div>
+
+    <div class="grid g3 reveal">
+      <div class="feature">
+        <div class="ico">①</div>
+        <h4>拉取</h4>
+        <p>Overpass API 拉取指定 bbox 内的可步行路网、有名建筑与设施 POI，同时过滤掉自行车租赁点等噪声。</p>
+      </div>
+      <div class="feature">
+        <div class="ico">②</div>
+        <h4>缝合</h4>
+        <p>OSM 里同一条路在不同 way 上端点坐标可能差几米。只按坐标完全相同缝合会碎成一堆孤岛，故用并查集按 <b>12 米</b>半径合并。</p>
+      </div>
+      <div class="feature">
+        <div class="ico">③</div>
+        <h4>吸附与哈希</h4>
+        <p>POI 吸附到最近路网节点；路线结论附带 <code>geometryHash</code>，由节点与边的几何串做 SHA-256，任何人都能复算验证。</p>
+      </div>
+    </div>
+
+    <div class="grid g2 reveal" style="margin-top:18px;align-items:start">
+      <div class="codeblock">
+        <div class="codeblock-head"><span>构建脚本（可复现）</span>
+          <button class="copy-btn" data-copy="#buildCode">复制</button></div>
+        <pre id="buildCode"><code>node scripts/build-scene-from-osm.mjs \
+  --bbox 30.3070,120.3720,30.3190,120.3920 \
+  --scene-id zjgsu-xiasha \
+  --scene-name "浙江工商大学下沙校区" \
+  --out data/scenes/zjgsu-xiasha.json
+
+▸ 拿到 513 个 OSM 元素
+▸ 命名点位 : 134
+▸ 建筑轮廓 : 113
+▸ 路网节点 : 593
+▸ 可行边   : 597
+▸ 连通率   : 13.5%
+▸ 可走实测步道的地标点对 : 381 对（孤立 10 个）
+▸ 版权声明 : © OpenStreetMap contributors (ODbL)</code></pre>
+      </div>
+
+      <div class="panel">
+        <h3 style="font-size:15px;margin-bottom:14px">路网是碎的，我们没有假装它是整的</h3>
+        <p style="color:var(--text-dim);font-size:14px">
+          下沙校区的 OSM 步道数据本身是<b>碎片化</b>的：全图被切成 38 个连通分量。
+          很多项目遇到这种情况会直接生成一张好看的示意路网——那样演示很顺，
+          但结论不可核验，也经不起评委追问。
+        </p>
+        <p style="color:var(--text-dim);font-size:14px;margin-top:12px">
+          本项目的选择是：<b>路通就给出实测路径</b>，路不通就退化为<b>明确标注的直距估算</b>，
+          并在响应里用 <code>route.type</code> 与 <code>measured</code> 字段说清楚。宁可少一点，也不假装。
+        </p>
+
+        <div class="metrics" style="margin-top:18px;padding:16px;border-radius:12px;background:var(--bg-deep);border:1px solid var(--border)">
+          <div class="metric"><div class="k">命名地标（去重）</div><div class="v num" id="connLandmarks">—</div></div>
+          <div class="metric"><div class="k">存在实测步道的点对</div><div class="v num" id="connPairs">—</div></div>
+          <div class="metric"><div class="k">连通分量</div><div class="v num" id="connComps">—</div></div>
+          <div class="metric"><div class="k">孤立地标</div><div class="v num" id="connIsolated">—</div></div>
+        </div>
+        <p style="color:var(--text-faint);font-size:12.5px;margin-top:10px" id="connNote"></p>
+
+        <div class="notice notice-cyan" style="margin-top:16px">
+          演示区的默认问题选在真实连通的点对上，因此返回的是
+          <code>route.type = walkway</code>、<code>measured = true</code> 的实测路径；
+          而像<b>浙江工商大学图书馆</b>这样在 OSM 中没有任何相连步道的孤立地标，
+          会明确返回 <code>direct-estimate</code> 并附上说明——两种情况都能在演示里现场复现。
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ 关于 ══════════════════════════ -->
+<section id="about">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="eyebrow">关于</span>
+      <h2>陈俊烨 · 三维问路 SceneGuide</h2>
+      <p>浙江工商大学信电人工智能学院硕士在读，2027.09 博士入学。做 AI 应用与智能体，也做 AI 活动组织与教学。</p>
+    </div>
+
+    <div class="author reveal">
+      <div class="author-card">
+        <div class="author-avatar" role="img" aria-label="陈俊烨"></div>
+        <div class="author-name">陈俊烨</div>
+        <div class="author-role">AI 应用 / 智能体开发</div>
+        <div class="author-links">
+          <a href="https://github.com/antgroup" target="_blank" rel="noopener">代码</a>
+          <a href="#demo">在线体验</a>
+          <a href="https://aipay.alipay.com/community/events/payathon-2026" target="_blank" rel="noopener">赛事</a>
+        </div>
+      </div>
+
+      <div class="author-body">
+        <p>
+          做过医疗 AI（病历智能体 DrCopilot，与中国科学院杭州医学研究所课题组合作）、
+          校级业务系统（研究生教学督导评价平台，覆盖 27 个学院 2117 门课程）、
+          数字孪生（商大元境 422 栋楼宇的三维重建）与多智能体协同平台；
+          11 个月里参与了 29 场 AI 黑客松与行业活动，也给 7–13 岁的孩子上 AI 课。
+        </p>
+        <p>
+          <b>这个作品解决的是我此前作品集里最大的一个缺口</b>：13 件作品全部免费、零用户、零收入，
+          也没有任何一条支付、计费、凭证核验的工程链路。这次把它补上。
+        </p>
+
+        <div class="gap-list">
+          <div class="gap-row"><span class="before">商业化闭环 —— 无定价、无订单、无付费用户</span><span class="after">→ 真实付费订单与用量看板</span></div>
+          <div class="gap-row"><span class="before">支付 / 交易工程 —— 简历里一条都没有</span><span class="after">→ 402 协议全链路 + 五项核验 + 幂等履约</span></div>
+          <div class="gap-row"><span class="before">Agent 作为经济主体 —— 多智能体只在系统内协商</span><span class="after">→ Agent 自行发现、支付、拿交付</span></div>
+          <div class="gap-row"><span class="before">人用界面 → Agent 原生服务</span><span class="after">→ SKILL.md + REST API 双形态</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ══════════════════════════ 页脚 ══════════════════════════ -->
+<footer>
+  <div class="wrap footer-grid">
+    <div>
+      <div style="color:var(--text-dim);font-weight:600;margin-bottom:6px">三维问路 · SceneGuide</div>
+      <div>可被 Agent 自动购买的场景导览服务 · PAYATHON 2026 · 支付宝 AI 付黑客松</div>
+      <div style="margin-top:6px">场景数据 © OpenStreetMap contributors (ODbL) ｜ 支付能力：支付宝 AI 付 AI 按量付费（A2M 智能收）</div>
+    </div>
+    <div class="footer-links">
+      <a href="#demo">实时演示</a>
+      <a href="#protocol">支付链路</a>
+      <a href="#deliverables">交付验收</a>
+      <a href="#tracks">赛道契合</a>
+      <a href="#pricing">商业化</a>
+      <a href="#wall">社区反馈</a>
+      <a href="#api">API 参考</a>
+      <a href="#engineering">工程细节</a>
+      <a href="#about">关于</a>
+      <a href="https://aipay.alipay.com/community/events/payathon-2026" target="_blank" rel="noopener">赛事官网 ↗</a>
+    </div>
+  </div>
+</footer>
+
+<!-- 静态资源带版本号：这个站的 JS 就是作品本体，任何缓存命中都会让评委看到旧版本 -->
+<script src="app.js?v=20261108-live11"></script>
+</body>
+</html>
