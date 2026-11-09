@@ -1,0 +1,42 @@
+# 三维问路 SceneGuide（PAYATHON 2026）—— 60.205.204.162
+# 按服务器 /srv/DEPLOYMENT.md 规范；端口 3001 以冲突排查实测为准
+services:
+  sceneguide:
+    image: public.ecr.aws/docker/library/node:20-bookworm
+    container_name: sceneguide
+    restart: unless-stopped
+    working_dir: /app
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      NODE_OPTIONS: --max-old-space-size=192
+      ALIPAY_SELLER_NAME: 三维问路
+      # better-sqlite3 走 npmmirror 预编译二进制（容器内不做编译，防 OOM）
+      npm_config_better_sqlite3_binary_host: https://registry.npmmirror.com/-/binary/better-sqlite3
+    command: >
+      sh -c "npm ci --omit=dev --no-audit --no-fund --registry=https://registry.npmmirror.com;
+             exec node src/server.js"
+    ports:
+      - "127.0.0.1:3001:3000"
+    volumes:
+      - ./app:/app
+      - ./data:/app/data
+      - deps:/app/node_modules
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: "0.50"
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+volumes:
+  deps:

@@ -1,0 +1,7 @@
+{
+  "port": 3001,
+  "project": "sceneguide",
+  "reserved_at": "<部署时填 ISO 时间>",
+  "reserved_by": "cjy-agent",
+  "note": "三维问路 SceneGuide（PAYATHON 2026）"
+}

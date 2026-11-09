@@ -9,17 +9,17 @@
 # ============================================================
 set -euo pipefail
 
-# 目标一（aliyun，当前线上实例）：
-#   TARGET=aliyun bash deploy/deploy.sh
-#   → rsync 到 /srv/apps/sceneguide/app/ → docker compose restart → 健康检查
-# 目标二（systemd 裸机，60.205.204.162）：
-#   SERVER=root@60.205.204.162 bash deploy/deploy.sh
+# 目标一（sg60，当前线上实例 60.205.204.162）：
+#   TARGET=sg60 bash deploy/deploy.sh
+#   → 打包上传 /srv/apps/sceneguide/app/ → 场景同步进挂载卷 → compose 重启 → 健康检查
+# 目标二（systemd 裸机，其它机器）：
+#   SERVER=root@<ip> bash deploy/deploy.sh
 
 TARGET="${1:-${TARGET:-}}"
 
-if [[ "$TARGET" == "aliyun" ]]; then
+if [[ "$TARGET" == "sg60" || "$TARGET" == "aliyun" ]]; then
   set -euo pipefail
-  HOST="${SERVER:-aliyun}"
+  HOST="${SERVER:-root@60.205.204.162}"
   APP_DIR="/srv/apps/sceneguide/app"
   PORT=3001
   echo "▸ 发布到 ${HOST}:${APP_DIR}（Docker Compose · 端口 ${PORT}）"
