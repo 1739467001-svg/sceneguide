@@ -1414,6 +1414,14 @@ ${JSON.stringify(
         </div>`
       : '';
 
+    // 核验卡：把这笔已支付订单变成可公开分享的核验物（热度榜的浏览/点赞从这里来）
+    const verifyBtn = extra.envelope?.out_trade_no
+      ? `<div style="margin-top:14px">
+          <button class="btn btn-ghost btn-sm" id="verifyCardBtn" data-order="${esc(extra.envelope.out_trade_no)}">生成核验卡 · 可分享</button>
+          <span style="font-size:11.5px;color:var(--text-faint);margin-left:8px">脱敏交易号 + 证据哈希，不含答案内容</span>
+        </div>`
+      : '';
+
     // 权益额度提示：本次调用是从已购额度里扣的，不是新付款
     const ent = extra.entitlement
       ? `<div class="notice notice-cyan" style="margin-top:12px">
@@ -1426,7 +1434,21 @@ ${JSON.stringify(
 
     setResult(`
       <div class="result-lead">${esc(content.answer ?? '')}</div>
-      ${metrics}${honest}${ent}${billing}${evidence}${trade}`);
+      ${metrics}${honest}${ent}${billing}${evidence}${trade}${verifyBtn}`);
+
+    $('#verifyCardBtn')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const url = `${location.origin}${location.pathname}verify.html?t=${encodeURIComponent(btn.dataset.order)}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        btn.textContent = '核验卡链接已复制';
+      } catch {
+        // 剪贴板不可用（非安全上下文等）：直接打开核验卡
+        window.open(`verify.html?t=${encodeURIComponent(btn.dataset.order)}`, '_blank');
+        btn.textContent = '核验卡已在新窗口打开';
+      }
+      setTimeout(() => { btn.textContent = '生成核验卡 · 可分享'; }, 2400);
+    });
   }
 
   /** 研学任务渲染：线索链 + 打卡进度 + 完成证书，三维里同步高亮打卡点 */

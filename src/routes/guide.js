@@ -650,6 +650,65 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
     });
   });
 
+  /**
+   * 订单核验卡（公开、可分享）。
+   *
+   * 为什么存在：付费结果目前止于买家自己——买完没有任何可分享的东西。
+   * 而本作品的差异化卖点恰恰是「可核验」。核验卡把每一笔已支付订单
+   * 变成一张公开的分享物：脱敏交易号 + 证据哈希 + 距离与端点，
+   * 不含完整答案与路线折线（那仍是付费内容）。
+   * 传播路径：买家分享核验卡 → 朋友看到「这笔交易真实发生且可复算」→
+   * 「我也要问」按钮带 ref=share 归因回流 → 新访客进漏斗。
+   *
+   * 隐私边界：无买家任何个人信息（本来就没存）；交易号只露尾 6 位。
+   */
+  router.get('/api/v1/verify/:outTradeNo', async (req, res) => {
+    const order = await repository.findByOutTradeNo(req.params.outTradeNo);
+    if (!order) return res.status(404).json({ code: 'ORDER_NOT_FOUND', message: '没有这笔订单' });
+
+    const paid = order.orderStatus === 'PAID' && order.fulfillStatus === 'FULFILLED';
+    if (!paid) {
+      // 未支付/未履约的订单只确认存在性，不给内容——防止用核验接口探测订单状态细节
+      return res.status(404).json({ code: 'ORDER_NOT_VERIFIABLE', message: '订单不可核验' });
+    }
+
+    const result = order.serviceResult ?? {};
+    const route = result.route ?? {};
+    const q = result.quest ?? null;
+    const mask = (s) => (s ? `…${String(s).slice(-6)}` : null);
+
+    return res.json({
+      verifiable: true,
+      out_trade_no: order.outTradeNo,
+      trade_no_masked: mask(order.tradeNo),
+      goods_name: order.goodsName,
+      amount: order.amount,
+      currency: order.currency,
+      tier: order.tier,
+      scene: result.scene?.name ?? null,
+      // 内容摘要：路线给端点与距离，不给折线；任务给标题与站点数，不给线索
+      summary:
+        q
+          ? {
+              kind: 'quest',
+              title: q.title,
+              checkpoints: (q.checkpoints ?? []).length,
+              total_distance_m: q.total_distance_m ?? null,
+            }
+          : {
+              kind: 'route',
+              from: route.from?.name ?? null,
+              to: route.to?.name ?? null,
+              distance_m: route.distance_m ?? null,
+              path_type: route.type ?? null,
+            },
+      evidence: result.evidence ?? null,
+      usage: result.billing ?? null,
+      fulfilled_at: order.updatedAt ?? null,
+      cta: { message: '我也要问', url: '/?ref=share' },
+    });
+  });
+
   /* ────────────── 场景任务：打卡闭环 ────────────── */
 
   /** 查询任务状态（含已打卡与证书） */

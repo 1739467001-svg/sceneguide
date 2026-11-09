@@ -468,6 +468,38 @@ FB_GONE=$("${CURL[@]}" -b "$FBJ" "$BASE/api/v1/feedback" 2>/dev/null | node -e "
 if [[ "$FB_GONE" == "gone" ]]; then ok "撤回后不再出现在反馈墙"; else bad "撤回后仍在列表中"; fi
 rm -f "$FBJ"
 
+# ── 13. 订单核验卡（公开可分享，热度榜的浏览来源之一）────────
+step "13. 订单核验卡"
+VERIFY=$("${CURL[@]}" "$BASE/api/v1/verify/$ORDER" 2>/dev/null)
+V_OK=$(node -e "
+  try{const j=JSON.parse(process.argv[1]);
+    const ok=j.verifiable===true && j.summary?.kind==='route' && j.summary?.distance_m>0
+      && /^…\\d{6}$/.test(j.trade_no_masked ?? '') && /^sha256:/.test(j.evidence?.geometryHash ?? '')
+      && !('content' in j);
+    console.log(ok?'yes':'no');
+  }catch(e){console.log('no')}
+" "$VERIFY")
+if [[ "$V_OK" == "yes" ]]; then
+  ok "已支付订单出具核验卡（脱敏交易号 + 距离 + 证据哈希，无答案内容）"
+else
+  bad "核验卡字段异常：$(head -c 120 <<<"$VERIFY")"
+fi
+
+# 核验卡页面本身可访问
+if "${CURL[@]}" -o /dev/null -w '%{http_code}' "$BASE/verify.html" | grep -q '^200$'; then
+  ok "verify.html 可访问（分享落地页）"
+else
+  bad "verify.html 不可访问"
+fi
+
+# 不可核验的订单必须拒绝（防探测）
+NV=$("${CURL[@]}" -o /dev/null -w '%{http_code}' "$BASE/api/v1/verify/SG_verify_nonexistent_$REF")
+if [[ "$NV" == "404" ]]; then
+  ok "不存在订单返回 404（不可探测订单状态细节）"
+else
+  bad "不存在订单应 404，实际 $NV"
+fi
+
 # ── 汇总 ────────────────────────────────────────────────────
 printf '\n%s\n' "────────────────────────────────────────────────────────"
 if [[ $FAIL -eq 0 ]]; then

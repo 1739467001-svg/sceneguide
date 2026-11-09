@@ -228,6 +228,8 @@ export function createOrderRepository({ file = 'data/orders.db' } = {}) {
         visitorId: row.visitor_id,
         refCode: row.ref_code,
         source: row.source,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
         // 落库存 JSON 字符串，出库统一还原为对象，保证调用方拿到的类型恒定
         serviceResult: parseServiceResult(row.service_result),
       };
