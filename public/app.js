@@ -755,6 +755,15 @@ ${esc(JSON.stringify(envelope, null, 2))}</code></pre>
     const o = data.overall;
     $('#funnelTag').textContent = `${o.visitors} 访客 · 付费 ${o.paid}（真实 ${o.paidReal} / 自测 ${o.paidSelfTest}）`;
     $('#funnelTag').className = 'tag cyan';
+    // 周维度：官方展示页热度榜分周榜/总榜——近 7 天的新互动比累计值更能代表当下热度
+    const w = data.weekly;
+    if (w) {
+      const badge = document.createElement('span');
+      badge.className = 'tag cyan';
+      badge.style.marginLeft = '8px';
+      badge.textContent = `近 7 天：${w.visitors} 新访客 · ${w.paid} 付费（真实 ${w.paidReal}）· ¥${w.revenueCny}`;
+      $('#funnelTag')?.after(badge);
+    }
 
     tbody.innerHTML = data.channels
       .map(
@@ -2017,13 +2026,34 @@ ${JSON.stringify(
   }
 
   // 注册 Service Worker —— 让作品可作为「桌面应用」安装（PWA）
-  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  // 🔴 Service Worker 只在安全上下文注册：localhost 或 HTTPS。
+  //    IP 直连（HTTP）下注册必然失败——所以「可安装 PWA」的承诺
+  //    在 IP 部署时是不成立的。这里做两件事：
+  //    ① 不满足安全上下文时干脆不注册（免一次必失败的注册）；
+  //    ② 在页脚给出当前条件下**真正可用**的桌面应用路径
+  //       （浏览器「创建快捷方式 → 在窗口中打开」），HTTPS 后自动恢复一键安装。
+  const SECURE = window.isSecureContext === true;
+  if ('serviceWorker' in navigator && SECURE && location.protocol !== 'file:') {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('sw.js').catch(() => {
         /* 注册失败不影响主流程，静默降级 */
       });
     });
   }
+
+  // 桌面应用安装引导：按运行环境给诚实的那一条路
+  (function renderInstallHint() {
+    const el = $('#installHint');
+    if (!el) return;
+    if (SECURE && 'serviceWorker' in navigator) {
+      el.innerHTML = `已部署在安全上下文：用浏览器地址栏的<b>安装</b>图标即可装为桌面应用，离线可用。`;
+    } else {
+      el.innerHTML = `当前为 IP 直连（HTTP），浏览器不提供 PWA 一键安装。
+        用 <b>更多工具 → 创建快捷方式 → 勾选「在窗口中打开」</b>，同样获得独立的桌面窗口形态；
+        HTTPS 部署后自动恢复一键安装与离线缓存。`;
+    }
+  })();
+
 
   boot().catch((err) => {
     console.error('[site] boot failed', err);

@@ -411,8 +411,13 @@ export function createAnalyticsStore({ file = 'data/analytics.db' } = {}) {
      *   revenue    累计收入（元）
      *   conv       访客 → 付费 转化率
      */
-    funnel(orderStats = []) {
+    funnel(orderStats = [], { weekly = null } = {}) {
       const visitorCount = db.prepare('SELECT COUNT(DISTINCT id) AS n FROM visitors').get().n;
+      // 近 7 天新访客（呼应官方热度榜的周榜节奏：新互动比累计值更能代表当下热度）
+      const since = new Date(Date.now() - 7 * 86400_000).toISOString();
+      const weeklyVisitors = db
+        .prepare('SELECT COUNT(DISTINCT id) AS n FROM visitors WHERE first_seen >= ?')
+        .get(since).n;
 
       const perChannel = db
         .prepare(`
@@ -521,7 +526,14 @@ export function createAnalyticsStore({ file = 'data/analytics.db' } = {}) {
         convPct: visitorCount ? Number(((sum('paid') / visitorCount) * 100).toFixed(1)) : 0,
       };
 
-      return { overall, channels, generatedAt: now() };
+      const weeklyOut = {
+        visitors: weeklyVisitors,
+        paid: weekly?.paid ?? 0,
+        paidReal: weekly?.paid_real ?? 0,
+        revenueCny: Number((weekly?.revenue ?? 0).toFixed(2)),
+      };
+
+      return { overall, weekly: weeklyOut, channels, generatedAt: now() };
     },
   };
 }

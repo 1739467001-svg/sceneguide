@@ -500,6 +500,25 @@ else
   bad "不存在订单应 404，实际 $NV"
 fi
 
+# ── 14. 周维度热度（呼应官方热度榜的周榜节奏）────────────────
+step "14. 周维度热度"
+WEEK=$("${CURL[@]}" "$BASE/api/v1/growth" 2>/dev/null | node -e "
+  let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+    try{const j=JSON.parse(s);
+      const w=j.weekly ?? {};
+      console.log(Number.isInteger(w.visitors)&&Number.isInteger(w.paid)&&Number.isInteger(w.paidReal)&&Number.isFinite(w.revenueCny)?'ok':'bad');
+    }catch(e){console.log('bad')}
+  });")
+if [[ "$WEEK" == "ok" ]]; then
+  ok "漏斗含近 7 天周维度（新访客 / 付费 / 其中真实 / 收入）"
+else
+  bad "周维度字段缺失"
+fi
+
+# 桌面应用引导：当前环境必须给出诚实的安装路径
+INSTALL=$("${CURL[@]}" "$BASE/" 2>/dev/null | grep -c 'id="installHint"')
+if [[ "$INSTALL" == "1" ]]; then ok "桌面应用形态引导位存在（按安全上下文给诚实路径）"; else bad "缺少桌面应用引导"; fi
+
 # ── 汇总 ────────────────────────────────────────────────────
 printf '\n%s\n' "────────────────────────────────────────────────────────"
 if [[ $FAIL -eq 0 ]]; then

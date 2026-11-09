@@ -398,6 +398,23 @@ export function createOrderRepository({ file = 'data/orders.db' } = {}) {
     },
 
     /**
+     * 订单侧近 7 天汇总（周维度，呼应官方热度榜的周榜节奏）。
+     * 与 orderStatsByVisitor 的区别：不带归因维度，只看时间窗。
+     */
+    orderStatsWeekly() {
+      const since = new Date(Date.now() - 7 * 86400_000).toISOString();
+      return db
+        .prepare(`
+          SELECT COUNT(*) AS paid,
+                 SUM(CASE WHEN source != 'demo' THEN 1 ELSE 0 END) AS paid_real,
+                 CAST(SUM(CASE WHEN order_status = 'PAID' THEN CAST(amount AS REAL) ELSE 0 END) AS REAL) AS revenue
+          FROM orders
+          WHERE order_status = 'PAID' AND created_at >= ?
+        `)
+        .get(since);
+    },
+
+    /**
      * 订单侧漏斗预聚合（按访客）。
      * 供 analytics.funnel() 消费 —— SQLite 不能跨库 JOIN，两边各自聚合后 JS 合并。
      */

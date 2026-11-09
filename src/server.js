@@ -114,7 +114,7 @@ export function createApp({ config, services, sellerId, repository, alipayClient
   /* ── 转化漏斗看板 ── */
   app.get('/api/v1/growth', (req, res) => {
     if (!analytics) return res.status(503).json({ code: 'ANALYTICS_DISABLED' });
-    return res.json(analytics.funnel(repository.orderStatsByVisitor()));
+    return res.json(analytics.funnel(repository.orderStatsByVisitor(), { weekly: repository.orderStatsWeekly() }));
   });
 
   /* ── 渠道注册（幂等）。生产环境需要 token，沙箱开放 ── */
