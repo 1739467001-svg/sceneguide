@@ -17,9 +17,21 @@ set -euo pipefail
 
 TARGET="${1:-${TARGET:-}}"
 
+# 目标映射：aliyun = 当前生产（121.43.80.231）；sg60 = 备用机（60.205.204.162，待恢复）
+CASE_HOST() {
+  case "$1" in
+    aliyun) echo "aliyun" ;;              # ssh config 别名 → 121.43.80.231
+    sg60)   echo "root@60.205.204.162" ;;
+    *)      echo "$1" ;;                  # 直接给 user@host
+  esac
+}
 if [[ "$TARGET" == "sg60" || "$TARGET" == "aliyun" ]]; then
   set -euo pipefail
-  HOST="${SERVER:-root@60.205.204.162}"
+  HOST="$(CASE_HOST "$TARGET")"
+  if [[ "$HOST" == "root@60.205.204.162" ]]; then
+    ssh -o ConnectTimeout=8 -o BatchMode=yes "$HOST" 'echo ok' >/dev/null 2>&1 \
+      || { echo "✗ 60.205.204.162 不可达（死机）。生产在 aliyun：TARGET=aliyun"; exit 1; }
+  fi
   APP_DIR="/srv/apps/sceneguide/app"
   PORT=3001
   echo "▸ 发布到 ${HOST}:${APP_DIR}（Docker Compose · 端口 ${PORT}）"
