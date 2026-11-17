@@ -324,7 +324,7 @@ rm -f "$VCJ"
 # ── 10. 站点完整性 ────────────────────────────────────────────
 step "10. 站点完整性"
 for path in / /styles.css /app.js /three-scene.js /vendor/three.module.js /data/api-reference.json \
-            /manifest.webmanifest /sw.js /icon-192.png /icon-512.png /404.html /llms.txt; do
+            /manifest.webmanifest /sw.js /icon-192.png /icon-512.png /404.html /llms.txt /introduction.html; do
   CODE=$("${CURL[@]}" -o /dev/null -w '%{http_code}' "$BASE$path")
   if [[ "$CODE" == "200" ]]; then ok "GET $path → 200"; else bad "GET $path → $CODE"; fi
 done
