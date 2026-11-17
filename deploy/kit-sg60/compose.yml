@@ -1,31 +1,31 @@
 # 三维问路 SceneGuide（PAYATHON 2026）—— 60.205.204.162
-# 按服务器 /srv/DEPLOYMENT.md 规范；端口 3001 以冲突排查实测为准
+#
+# 内存约束：这台 2G 机器可用内存约 300MB。
+#   → 镜像在**本机构建**（Dockerfile 已把 node_modules 烤进去），容器启动不跑 npm ci；
+#   → 容器内存上限 256MB、Node 堆上限 128MB，给宿主留出余量；
+#   → 依赖卷只放 node_modules（体积大但内存不吃），场景数据已烤进镜像。
 services:
   sceneguide:
-    image: public.ecr.aws/docker/library/node:20-bookworm
+    image: sceneguide:1.0
     container_name: sceneguide
     restart: unless-stopped
     working_dir: /app
     environment:
       NODE_ENV: production
       PORT: 3000
-      NODE_OPTIONS: --max-old-space-size=192
+      NODE_OPTIONS: --max-old-space-size=128
       ALIPAY_SELLER_NAME: 三维问路
-      # better-sqlite3 走 npmmirror 预编译二进制（容器内不做编译，防 OOM）
-      npm_config_better_sqlite3_binary_host: https://registry.npmmirror.com/-/binary/better-sqlite3
-    command: >
-      sh -c "npm ci --omit=dev --no-audit --no-fund --registry=https://registry.npmmirror.com;
-             exec node src/server.js"
+      SCENE_DIR: /app/scenes
+      ANALYTICS_DB: /app/data/analytics.db
     ports:
       - "127.0.0.1:3001:3000"
     volumes:
-      - ./app:/app
+      # 只挂数据库目录：场景数据在镜像里 /app/scenes，挂载不可能遮蔽它
       - ./data:/app/data
-      - deps:/app/node_modules
     deploy:
       resources:
         limits:
-          memory: 384M
+          memory: 256M
           cpus: "0.50"
     logging:
       driver: json-file
@@ -37,6 +37,4 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 120s
-volumes:
-  deps:
+      start_period: 25s

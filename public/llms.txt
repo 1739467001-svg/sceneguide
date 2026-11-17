@@ -11,9 +11,9 @@
 另提供「场景任务」交付物：线索链 → 逐站打卡（服务端强制顺序）→
 完成才颁发覆盖实际打卡记录的可核验证书。
 
-- 演示站点: http://60.205.204.162/sceneguide/
-- MCP 发现端点: POST http://60.205.204.162/sceneguide/mcp （JSON-RPC 2.0，tools/list 暴露 scene_guide[annotations.paid=true] 与 scene_guide_scenes）
-- 验收脚本: BASE_URL=http://60.205.204.162/sceneguide bash scripts/verify.sh （52 项，含真实支付）
+- 演示站点: http://121.43.80.231/sceneguide/
+- MCP 发现端点: POST http://121.43.80.231/sceneguide/mcp （JSON-RPC 2.0，tools/list 暴露 scene_guide[annotations.paid=true] 与 scene_guide_scenes）
+- 验收脚本: BASE_URL=http://121.43.80.231/sceneguide bash scripts/verify.sh （52 项，含真实支付）
 
 ## 计费
 

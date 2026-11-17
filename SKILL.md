@@ -25,7 +25,7 @@ description: 当用户询问某个具体场所（校园、园区、景区、展�
 向以下 URL 发起请求（演示环境已上线，可直接调用）：
 
 ```
-curl -v "http://60.205.204.162/sceneguide/api/v1/guide?scene=<场景ID>&query=<用户问题>&origin=<可选起点>&tier=<可选档位>"
+curl -v "http://121.43.80.231/sceneguide/api/v1/guide?scene=<场景ID>&query=<用户问题>&origin=<可选起点>&tier=<可选档位>"
 ```
 
 参数说明：

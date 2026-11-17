@@ -65,8 +65,16 @@ export const SCENES = new Map([[DEMO_SCENE.id, DEMO_SCENE]]);
  * 只是数据来源不同。
  */
 function loadScenesFromDisk() {
-  const dir = path.resolve(process.cwd(), 'data', 'scenes');
-  if (!fs.existsSync(dir)) return;
+  // 🔴 场景目录可外部指定（SCENE_DIR）：容器里场景数据烤进镜像 /app/scenes，
+  //    而 /app/data 是数据库卷——两者分离后，卷挂载**不可能**再遮蔽场景数据
+  //    （历史上在 aliyun 因为 ./data 挂载遮住 app/data/scenes，线上少了一个场景）。
+  const dir = process.env.SCENE_DIR
+    ? path.resolve(process.env.SCENE_DIR)
+    : path.resolve(process.cwd(), 'data', 'scenes');
+  if (!fs.existsSync(dir)) {
+    console.warn(`[scenes] 场景目录不存在：${dir}`);
+    return;
+  }
 
   for (const file of fs.readdirSync(dir)) {
     if (!file.endsWith('.json')) continue;
