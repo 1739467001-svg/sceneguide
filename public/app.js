@@ -1997,6 +1997,8 @@ ${JSON.stringify(
     state.sceneId = scene.id;
     $('#sceneTag').textContent = scene.name;
     $('#srcTag').textContent = scene.source === 'openstreetmap' ? 'OpenStreetMap 实时数据' : '内置演示场景';
+    const skeleton = $('#mapSkeleton');
+    const skeletonText = $('#skeletonText');
 
     // 清上一场景的路线与三维实例（三维持有旧场景的几何，必须 dispose）
     state.lastRoute = null;
@@ -2008,16 +2010,37 @@ ${JSON.stringify(
       state.scene3d = null;
     }
 
-    const detail = await getJSON(`api/v1/scene/${encodeURIComponent(scene.id)}`);
-    if (!detail) return;
+    // 场景数据 sessionStorage 缓存：来回切换秒开（同一会话内场景数据不变）
+    const cacheKey = `sg-scene-${scene.id}`;
+    let detail = null;
+    try {
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) detail = JSON.parse(cached);
+    } catch {}
+    if (!detail) {
+      if (skeleton) { skeleton.hidden = false; }
+      if (skeletonText) skeletonText.textContent = '正在加载场景数据…';
+      detail = await getJSON(`api/v1/scene/${encodeURIComponent(scene.id)}`);
+      if (detail) {
+        try { sessionStorage.setItem(cacheKey, JSON.stringify(detail)); } catch {}
+      }
+    }
+    if (!detail) {
+      if (skeleton) skeleton.hidden = true;
+      return;
+    }
     state.scene = detail;
     fitView();
     draw();
+    if (skeleton) skeleton.hidden = true;
     if (state.view3d === '3d') {
       cv3d.hidden = false;
       cv2d.hidden = true;
+      if (skeletonText) skeletonText.textContent = '正在加载三维场景…';
+      if (skeleton) skeleton.hidden = false;
       init3D().then(() => {
         state.scene3d?.resize();
+        if (skeleton) skeleton.hidden = true;
         if (state.lastRoute) {
           state.scene3d?.setRoute(state.lastRoute.polyline, state.lastRouteMeta ?? {});
         }
@@ -2038,6 +2061,34 @@ ${JSON.stringify(
       navigator.serviceWorker.register('sw.js').catch(() => {
         /* 注册失败不影响主流程，静默降级 */
       });
+    });
+  }
+
+  /* ── 移动端汉堡导航 ──
+     移动端此前没有任何板块导航（链接全部隐藏）——评委在手机上
+     只能靠长滚动找板块。汉堡面板补齐这一点。 */
+  const burger = $('#navBurger');
+  const sheet = $('#navSheet');
+  if (burger && sheet) {
+    const closeSheet = () => {
+      sheet.classList.remove('open');
+      burger.classList.remove('open');
+      burger.setAttribute('aria-expanded', 'false');
+    };
+    burger.addEventListener('click', () => {
+      const open = !sheet.classList.contains('open');
+      sheet.classList.toggle('open', open);
+      burger.classList.toggle('open', open);
+      burger.setAttribute('aria-expanded', String(open));
+    });
+    sheet.addEventListener('click', (e) => {
+      if (e.target.closest('a')) closeSheet();
+    });
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#navBurger') && !e.target.closest('#navSheet')) closeSheet();
+    });
+    window.addEventListener('resize', () => {
+      if (window.innerWidth > 980) closeSheet();
     });
   }
 
