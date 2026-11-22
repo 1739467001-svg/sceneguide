@@ -4,6 +4,8 @@ node_modules/
 data/*.db
 data/*.db-shm
 data/*.db-wal
+# 数据库损坏备份（恢复时留档，如 orders.db.corrupt-20261121）——同样不进仓库
+data/*.db.*
 data/analytics/
 data/orders/
 # 但构建好的场景数据要进仓库：否则克隆下来跑不起来（要连 Overpass 现拉）

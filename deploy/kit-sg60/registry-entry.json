@@ -1,7 +1,7 @@
 {
   "port": 3001,
   "project": "sceneguide",
-  "reserved_at": "<部署时填 ISO 时间>",
+  "reserved_at": "2026-11-10",
   "reserved_by": "cjy-agent",
-  "note": "三维问路 SceneGuide（PAYATHON 2026）"
+  "note": "三维问路 SceneGuide（PAYATHON 2026）；reserved_at 取自本文件进入 git 的日期（commit 2552d1f，无更精确记录）；现网实例在 aliyun 121.43.80.231，sg60 已不可达"
 }

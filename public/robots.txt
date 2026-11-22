@@ -3,4 +3,7 @@ Allow: /
 Disallow: /api/
 Disallow: /mcp/
 Disallow: /r/
-Sitemap: /sitemap.xml
+Disallow: /account.html
+Disallow: /verify.html
+# ⚠️ Sitemap 指令按规范必须是完整 URL（相对路径会被忽略）。换域名时同步改这里。
+Sitemap: http://121.43.80.231/sceneguide/sitemap.xml

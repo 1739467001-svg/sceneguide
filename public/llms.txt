@@ -12,15 +12,16 @@
 完成才颁发覆盖实际打卡记录的可核验证书。
 
 - 演示站点: http://121.43.80.231/sceneguide/
-- MCP 发现端点: POST http://121.43.80.231/sceneguide/mcp （JSON-RPC 2.0，tools/list 暴露 scene_guide[annotations.paid=true] 与 scene_guide_scenes）
-- 验收脚本: BASE_URL=http://121.43.80.231/sceneguide bash scripts/verify.sh （52 项，含真实支付）
+- MCP 发现端点: POST http://121.43.80.231/sceneguide/mcp
+  （JSON-RPC 2.0；`tools/list` 暴露 `scene_guide`[annotations.paid=true] 与 `scene_guide_scenes`）
+- 验收: `BASE_URL=http://121.43.80.231/sceneguide bash scripts/verify.sh`（76 项，含真实支付）
 
 ## 计费
 
 | 档位 | 参数 | 生产价 | 交付物 |
 |---|---|---|---|
 | 单次导览 | `?tier=single` | ¥0.50/次 | 完整导览结果（路线+计量+证据哈希） |
-| 十次导览包 | `?tier=pack10` | ¥4.50/包 | 10 次导览额度（权益台账，逐次扣减） |
+| 十次导览包 | `?tier=pack10` | ¥4.50/包 | 10 次导览额度（权益台账，逐次扣减，可转赠） |
 | 场景任务 | `?mode=quest` | ¥9.90/次 | 线索链+打卡+可核验证书 |
 
 沙箱环境所有档位实收 ¥0.01（沙箱 mock 服务注册价固定）。
@@ -28,28 +29,59 @@
 ## 调用与支付流程（HTTP 402）
 
 1. `GET /api/v1/guide?scene=zjgsu-xiasha&query=…`
-   → `402 Payment Required` + `Payment-Needed` 响应头（Base64URL 账单）
-2. 将 `Payment-Needed` 头原样交给支付宝技能
-   `alipay-pay-for-402-service` 引导用户付款（买方不解码、不改动）
+   → `402 Payment Required` + `Payment-Needed` 响应头（Base64URL 账单，商家本地 RSA2 签名）
+2. 将 `Payment-Needed` 头**原样**交给支付宝技能
+   `alipay-pay-for-402-service` 引导用户付款（买方不解码、不改动、不缓存）
 3. 付款后携 `Payment-Proof` 头重试同一请求
    → `200` + `Payment-Validation` 头 + JSON 资源
 
-无需预下单 OpenAPI、无需注册回调；账单由商家本地 RSA2 签名构造。
+无需预下单 OpenAPI、无需注册回调。同一笔 `Payment-Proof` 重放是协议允许的：
+服务端按本地订单状态处理（已履约 → 直接交付；回执未确认 → 重试回执后交付），
+不会重复扣费、重复交付。
+
+## MCP 路径（与 HTTP 路径同构）
+
+`tools/call scene_guide` 未带凭证时，服务端内部回环真实 402 路由，返回
+`structuredContent.payment_needed_header`（带签名的 Base64URL 账单原文，订单已同步落库）——
+把它交给 `alipay-pay-for-402-service` 完成支付，再把得到的 Payment-Proof 以
+Base64URL 作为 `payment_proof` 参数重新调用即可。已购额度的 Agent 再次调用
+直接扣减交付，不重复发起支付。
 
 ## 主要端点
 
+付费与交付：
 - `GET /api/v1/guide` : 付费资源（402/200 两种形态，见上）
 - `GET /api/v1/guide?preview=1` : 免费试看（每访客每日 3 次，只给答案文本）
-- `GET /api/v1/scenes` / `GET /api/v1/scene/:id` : 场景目录与可视化数据（免费）
-- `GET /api/v1/entitlements` : 当前访客的额度余额（免费）
-- `GET /api/v1/orders/:outTradeNo` : 订单状态（免费）
+
+买家自助（按访客 cookie 隔离，只作用于自己的数据）：
+- `GET /api/v1/entitlements` : 额度余额与到期时间
+- `GET /api/v1/me` : 买家账户摘要（我的订单 / 余额 / 我生成与收到的礼品码）
+- `POST /api/v1/gifts` : 用 1 次已购额度生成礼品码（转赠）
+- `POST /api/v1/gifts/redeem` : 兑换礼品码，额度即时到账
+- `POST /api/v1/gifts/revoke` : 撤销尚未兑换的礼品码，额度退回
+- `POST /api/v1/refunds` : 申请退款（权益即时回收 + 工单留痕 + 订单标注）
+- `GET /api/v1/verify/:out_trade_no` : 订单核验卡（公开可分享：脱敏交易号 + 证据哈希）
+
+免费查询：
+- `GET /api/v1/scenes` / `GET /api/v1/scene/:id` : 场景目录与可视化数据
+- `GET /api/v1/orders/:outTradeNo` : 订单状态
 - `GET /api/v1/quests/:id` + `POST /api/v1/quests/:id/checkin` : 任务与打卡
 - `GET /api/v1/stats` / `GET /api/v1/growth` : 计量与渠道漏斗看板
+
+人类买家操作台：`account.html`（订单 / 额度 / 礼品码 / 退款 / 打印收据）。
+
+## 验收（不必相信本文件）
+
+```bash
+BASE_URL=http://121.43.80.231/sceneguide bash scripts/verify.sh   # 76 项：402 全链路 / 幂等 / 额度 / 打卡 / 归因 / 深层 404
+node scripts/verify-mcp-flow.mjs      # 21 项：Agent 路径 tools/list → 402 → 沙箱收银 → 交付 → 幂等重放
+node scripts/verify-account-flow.mjs  # 17 项：买家路径 买包 → 转赠 → 兑换 → 余额交付 → 撤销 → 退款回收
+```
 
 ## Agent 接入提示
 
 - 已安装 `@alipay/agent-payment` 的买方 Agent：收到 402 后直接走技能，无需本文件其余部分。
-- 自研宿主：按上面的 402 流程实现即可；账单字段见
-  `https://github.com/…/sceneguide` 仓库 `技术规格-A2M-402.md`（含三个实测坑：嵌套结构+扁平签名子集、
-  字典序拼接、PKCS#1 密钥格式）。
+- 自研宿主：按上面的 402 流程实现即可；账单字段与签名细节见仓库
+  `技术规格-A2M-402.md`（含四个实测坑：嵌套结构+扁平签名子集、字典序拼接、
+  PKCS#1 密钥格式、沙箱对重复验付/回执返回非标准响应需本地幂等短回路）。
 - 礼貌性要求：免费试看接口每访客每日 3 次，请勿脚本化刷取。

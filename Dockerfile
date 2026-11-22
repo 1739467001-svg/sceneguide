@@ -18,19 +18,33 @@
 # ============================================================
 
 # ── 阶段 1：依赖 ────────────────────────────────────────────
-FROM --platform=$TARGETPLATFORM public.ecr.aws/docker/library/node:20-bookworm AS deps
+# 注意：不要写 --platform=$TARGETPLATFORM —— buildx 提示冗余，且 legacy builder
+# （docker build，服务器侧直接构建用）解析不了这个变量，会直接报错。
+FROM public.ecr.aws/docker/library/node:20-bookworm AS deps
 
-# better-sqlite3 走预编译二进制（避免容器内编译，吃内存也吃时间）
-ENV npm_config_better_sqlite3_binary_host=https://registry.npmmirror.com/-/binary/better-sqlite3 \
-    npm_config_better_sqlite3_binary_host_mirror=https://npmmirror.com/mirrors/better-sqlite3/
+# 🔴 2026-11-22 事故记录：不要给 better-sqlite3 设 npmmirror binary host！
+#   npmmirror/-/binary/better-sqlite3 的 v13.0.3 预编译产物是坏的——
+#   dlopen 成功、:memory: 正常，但**文件型 DB（WAL）一打开就 SIGSEGV（exit 139）**。
+#   实测对照：同版本走 GitHub 官方 prebuilt 完全正常（服务器 node:20/22 双验证）。
+#   该坏产物曾同时烤进本机 QEMU 构建与服务器本地构建的镜像，容器无限崩溃重启。
+#   现恢复 prebuild-install 默认源（GitHub releases），服务器实测可正常下载；
+#   npm 包本身仍走 npmmirror registry（无影响）。
 
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund --registry=https://registry.npmmirror.com \
  && npm cache clean --force
 
+# ⚠️ 2026-11-21 记录：不要在这里加「容器内跑 better-sqlite3」的构建期自检。
+# 开发机（Apple Silicon + Docker Desktop）的容器运行时跑不了 better-sqlite3——
+# 实测裸 node:20-bookworm 现装 13.0.3 也 SIGSEGV（exit 139），与安装路径无关；
+# 而同一个镜像在线上 amd64 服务器跑得好好（healthz 通、订单在库）。
+# 也就是说本地「跑不了」不代表镜像坏，自检只会造成误报、挡住发布。
+# 真正的防线在部署后：deploy.sh 的重启健康检查（/healthz 轮询 30s）
+# + 部署后对公网地址跑 scripts/verify.sh 全量回归。
+
 # ── 阶段 2：运行时 ──────────────────────────────────────────
-FROM --platform=$TARGETPLATFORM public.ecr.aws/docker/library/node:20-bookworm AS runtime
+FROM public.ecr.aws/docker/library/node:20-bookworm AS runtime
 
 ENV NODE_ENV=production \
     PORT=3000 \

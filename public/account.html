@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="no-js">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>我的账户 · 三维问路 SceneGuide</title>
+<meta name="description" content="买家账户中心：我的订单、权益额度、礼品码转赠与售后申请。" />
+<meta name="theme-color" content="#070b16" />
+<meta name="robots" content="noindex" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%232f7bff'/%3E%3Ctext x='16' y='22' font-size='16' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'%3E三%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="styles.css?v=20261119-ui18" />
+</head>
+<body>
+<a class="skip-link" href="#main">跳到主要内容</a>
+
+<nav class="nav scrolled" id="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="./">
+      <span class="brand-mark">三</span>
+      <span>三维问路<span class="brand-sub"> / SceneGuide</span></span>
+    </a>
+    <div class="nav-links">
+      <a href="./#demo">实时演示</a>
+      <a href="./#pricing">商业化</a>
+      <a href="./#wall">社区反馈</a>
+      <a href="./" class="nav-cta">回到官网</a>
+    </div>
+    <button class="nav-burger" id="navBurger" aria-label="打开导航" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+    <nav class="nav-sheet" id="navSheet" aria-label="移动端导航">
+      <a href="./#demo">实时演示</a>
+      <a href="./#pricing">商业化</a>
+      <a href="./#wall">社区反馈</a>
+      <a href="./" class="nav-sheet-cta">回到官网</a>
+    </nav>
+  </div>
+</nav>
+
+<main id="main">
+<header class="hero" style="padding:56px 0 40px">
+  <div class="wrap">
+    <span class="eyebrow plain">买家账户</span>
+    <h1 style="font-size:clamp(28px,3.6vw,40px);letter-spacing:-.03em">我的账户</h1>
+    <p class="hero-sub" style="margin-top:14px">
+      这里只属于你：买过什么、还剩几次、能退、能转赠。
+      数据按访客隔离，<b>不存任何个人信息</b>——清空浏览器 cookie 即换个新身份。
+    </p>
+  </div>
+</header>
+
+<section style="padding-top:0">
+  <div class="wrap">
+    <div class="grid g3 reveal" id="acctCards">
+      <div class="panel">
+        <div class="label-cap">访客身份</div>
+        <div id="visitorBody"><div class="skeleton-text">加载中…</div></div>
+      </div>
+      <div class="panel">
+        <div class="label-cap">权益额度</div>
+        <div id="entBody"><div class="skeleton-text">加载中…</div></div>
+      </div>
+      <div class="panel">
+        <div class="label-cap">礼品码 · 额度转赠</div>
+        <div id="giftBody"><div class="skeleton-text">加载中…</div></div>
+      </div>
+    </div>
+
+    <div class="panel reveal" style="margin-top:18px">
+      <div class="panel-head">
+        <h3>我的订单</h3>
+        <span class="tag cyan" id="orderCount">加载中…</span>
+      </div>
+      <div id="orderBody"><div class="skeleton-text">加载中…</div></div>
+    </div>
+
+    <div class="notice notice-blue" style="margin-top:18px;line-height:1.8">
+      <b>关于退款的诚实说明</b>：当前演示跑在支付宝<b>沙箱</b>，资金是 mock 的，
+      沙箱侧也不支持真实退款接口（实测 <code>alipay.trade.refund</code> → <code>40004 Business Failed</code>）。
+      所以这里的「申请退款」做的是三件真实的事：<b>权益即时回收、工单留痕、订单标注</b>；
+      资金原路退回需要在生产环境（真实 <code>service_id</code>）由支付宝完成，商家后台可见每一笔工单。
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap footer-grid">
+    <div class="footer-brand">
+      <div class="footer-brand-title">三维问路 · SceneGuide</div>
+      <div class="footer-brand-sub">买家账户中心 · PAYATHON 2026</div>
+      <div class="footer-attr">场景数据 © OpenStreetMap contributors (ODbL)</div>
+    </div>
+    <nav class="footer-links" aria-label="页脚导航">
+      <span class="footer-col-title">回去看看</span>
+      <a href="./#demo">实时演示</a>
+      <a href="./#protocol">支付链路</a>
+      <a href="./#pricing">商业化</a>
+      <a href="./#wall">社区反馈</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+document.documentElement.classList.remove('no-js');
+
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const fmtTime = (iso) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso).slice(0, 19).replace('T', ' ');
+  return d.toLocaleString('zh-CN', { hour12: false });
+};
+const shortId = (id) => (id ? `${id.slice(0, 8)}…${id.slice(-4)}` : '—');
+
+const TIER_LABEL = { single: '单次导览', pack10: '十次导览包', quest: '场景任务' };
+
+function renderVisitor(v) {
+  $('#visitorBody').innerHTML = `
+    <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
+      <span class="ent-num" style="font-size:20px">${esc(shortId(v.id))}</span>
+    </div>
+    <table class="data"><tbody>
+      <tr><td>首触渠道</td><td class="n"><code>${esc(v.ref_code ?? '（直接访问）')}</code></td></tr>
+      <tr><td>访问次数</td><td class="n">${esc(v.visits ?? 0)}</td></tr>
+      <tr><td>首次到访</td><td class="n" style="font-size:12px">${esc(fmtTime(v.first_seen))}</td></tr>
+    </tbody></table>`;
+}
+
+function renderEntitlements(ent) {
+  const rows = (ent.entitlements ?? [])
+    .map((e) => `<tr>
+      <td>${esc(TIER_LABEL[e.tier] ?? e.tier)}</td>
+      <td class="n">${esc(e.remaining)} / ${esc(e.quota)}</td>
+      <td class="n" style="font-size:12px">${e.expired ? '<span style="color:var(--amber)">已过期</span>' : esc((e.expiresAt ?? '').slice(0, 10))}</td>
+    </tr>`)
+    .join('');
+  $('#entBody').innerHTML = `
+    <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
+      <span class="ent-num">${esc(ent.remaining ?? 0)}</span>
+      <span style="font-size:12.5px;color:var(--text-dim)">次可用（共发放 ${esc(ent.granted ?? 0)}，已用 ${esc(ent.used ?? 0)}）</span>
+    </div>
+    ${rows ? `<table class="data"><thead><tr><th>档位</th><th class="n">剩余</th><th class="n">到期</th></tr></thead><tbody>${rows}</tbody></table>`
+           : `<p style="font-size:12.5px;color:var(--text-faint);line-height:1.7">暂无额度。购买「十次导览包」后，10 次额度到账，之后每次调用直接扣减，不再重复收费；也可以在这里把次数转赠给别人。</p>`}`;
+}
+
+function renderGifts(gifts, ent) {
+  const created = gifts?.created ?? [];
+  const redeemed = gifts?.redeemed ?? [];
+  const canGift = (ent?.remaining ?? 0) > 0;
+  const statusTag = (s) =>
+    s === 'ACTIVE'
+      ? '<span class="tag cyan">可兑换</span>'
+      : s === 'REDEEMED'
+        ? '<span class="tag blue">已兑换</span>'
+        : '<span class="tag">已撤销</span>';
+  const createdRows = created.length
+    ? created.map((g) => `<tr>
+        <td><code>${esc(g.code)}</code></td>
+        <td class="n">${statusTag(g.status)}</td>
+        <td class="n">${g.status === 'ACTIVE' ? `<button class="copy-btn" data-revoke="${esc(g.code)}">撤销</button>` : '—'}</td>
+      </tr>`).join('')
+    : '';
+  const redeemedRows = redeemed.length
+    ? redeemed.map((g) => `<tr><td><code>${esc(g.code)}</code></td><td class="n">${statusTag(g.status)}</td><td class="n" style="font-size:12px">${esc(fmtTime(g.redeemedAt))}</td></tr>`).join('')
+    : '';
+  $('#giftBody').innerHTML = `
+    <p style="font-size:12.5px;color:var(--text-faint);line-height:1.7;margin-bottom:12px">
+      把已购次数转赠给同学、社团或家长群：生成码花 1 次额度，对方在<b>任意设备</b>打开本页输入码即可到账。
+    </p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      <button class="btn btn-primary btn-sm" id="genGiftBtn" ${canGift ? '' : 'disabled'}>生成礼品码（花 1 次）</button>
+      <span style="font-size:11.5px;color:var(--text-faint);align-self:center">${canGift ? `当前可转赠 ${esc(ent.remaining)} 次` : '当前没有可转赠额度'}</span>
+    </div>
+    <div class="fb-reply-form" style="margin:0 0 14px">
+      <input type="text" id="redeemInput" maxlength="24" placeholder="输入礼品码兑换" class="fb-reply-content-input" style="flex:1 1 160px" />
+      <button type="button" class="btn btn-ghost btn-sm" id="redeemBtn">兑换</button>
+      <span class="fb-reply-msg" id="redeemMsg"></span>
+    </div>
+    ${createdRows ? `<div class="label-cap">我生成的</div><table class="data"><tbody>${createdRows}</tbody></table>` : ''}
+    ${redeemedRows ? `<div class="label-cap" style="margin-top:14px">我收到的</div><table class="data"><tbody>${redeemedRows}</tbody></table>` : ''}`;
+  bindGiftActions();
+}
+
+function renderOrders(orders) {
+  $('#orderCount').textContent = `${orders.length} 笔`;
+  if (!orders.length) {
+    $('#orderBody').innerHTML = `
+      <div class="fb-empty">
+        <div class="fb-empty-title">还没有订单</div>
+        <p style="font-size:13px;color:var(--text-dim);line-height:1.7">
+          第一笔从「实时演示」开始：输入问题 → 拿到 402 支付挑战 → 走一遍真实沙箱支付。
+          每天有 3 次免费试看，不必先付钱也能看到这个页面是做什么的。
+        </p>
+        <div style="margin-top:14px"><a class="btn btn-primary btn-sm" href="./#demo">去体验第一笔</a></div>
+      </div>`;
+    return;
+  }
+  const rows = orders
+    .map((o) => {
+      const state = o.refundStatus === 'REFUNDED'
+        ? '<span class="tag amber">已退</span>'
+        : o.fulfillStatus === 'FULFILLED'
+          ? '<span class="tag cyan">已交付</span>'
+          : o.orderStatus === 'PAID'
+            ? '<span class="tag blue">已支付</span>'
+            : '<span class="tag">待支付</span>';
+      const actions = [];
+      if (o.fulfillStatus === 'FULFILLED' && o.refundStatus !== 'REFUNDED') {
+        actions.push(`<button class="copy-btn" data-verify="${esc(o.outTradeNo)}">核验卡</button>`);
+        actions.push(`<button class="copy-btn" data-refund="${esc(o.outTradeNo)}">申请退款</button>`);
+      }
+      return `<tr>
+        <td style="white-space:nowrap;font-size:12px;color:var(--text-faint)">${esc(fmtTime(o.createdAt))}</td>
+        <td>${esc(o.goodsName)}${o.source === 'demo' ? ' <span class="tag" style="font-size:10px">演示自测</span>' : ''}</td>
+        <td class="n">¥${esc(o.amount)}</td>
+        <td class="n">${state}</td>
+        <td class="n" style="white-space:nowrap">${actions.join(' ') || '—'}</td>
+      </tr>`;
+    })
+    .join('');
+  $('#orderBody').innerHTML = `
+    <table class="data">
+      <thead><tr><th>时间</th><th>商品</th><th class="n">金额</th><th class="n">状态</th><th class="n">操作</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p style="font-size:12px;color:var(--text-faint);margin-top:10px">
+      订单只保存在本机访客 cookie 对应的记录里；换设备/清 cookie 后看不到——这是隐私最小化的代价，也是设计选择。
+    </p>`;
+}
+
+function bindGiftActions() {
+  $('#genGiftBtn')?.addEventListener('click', async () => {
+    const btn = $('#genGiftBtn');
+    btn.disabled = true;
+    try {
+      const res = await fetch('api/v1/gifts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const j = await res.json();
+      if (!res.ok) {
+        alert(j.error ?? '生成失败');
+        return;
+      }
+      await load();
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  $('#redeemBtn')?.addEventListener('click', async () => {
+    const msg = $('#redeemMsg');
+    const code = $('#redeemInput').value.trim();
+    if (!code) { msg.textContent = '先输入礼品码'; return; }
+    msg.textContent = '兑换中…';
+    try {
+      const res = await fetch('api/v1/gifts/redeem', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }),
+      });
+      const j = await res.json();
+      msg.textContent = res.ok ? `兑换成功，+${j.quota} 次额度` : (j.error ?? '兑换失败');
+      if (res.ok) { $('#redeemInput').value = ''; await load(); }
+    } catch (err) {
+      msg.textContent = `兑换失败：${err.message}`;
+    }
+  });
+  $$('#giftBody [data-revoke]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const res = await fetch('api/v1/gifts/revoke', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: btn.dataset.revoke }),
+      });
+      const j = await res.json();
+      if (!res.ok) alert(j.error ?? '撤销失败');
+      await load();
+    });
+  });
+}
+
+function bindOrderActions() {
+  $$('#orderBody [data-verify]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      window.open(`verify.html?t=${encodeURIComponent(btn.dataset.verify)}`, '_blank');
+    });
+  });
+  $$('#orderBody [data-refund]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const reason = prompt('申请退款原因（可选，最多 200 字）：', '');
+      if (reason === null) return;
+      const res = await fetch('api/v1/refunds', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ out_trade_no: btn.dataset.refund, reason }),
+      });
+      const j = await res.json();
+      if (!res.ok) { alert(j.error ?? '申请失败'); return; }
+      alert(`已受理：权益已回收（沙箱口径）。\n${j.note ?? ''}`);
+      await load();
+    });
+  });
+}
+
+async function load() {
+  let data = null;
+  try {
+    const res = await fetch('api/v1/me');
+    data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+  } catch (err) {
+    $('#visitorBody').innerHTML = `<div class="notice notice-amber" style="margin:0">加载失败：${esc(err.message)}</div>`;
+    $('#entBody').innerHTML = '';
+    $('#giftBody').innerHTML = '';
+    $('#orderBody').innerHTML = '';
+    return;
+  }
+  renderVisitor(data.visitor);
+  renderEntitlements(data.entitlements);
+  renderGifts(data.gifts, data.entitlements);
+  renderOrders(data.orders);
+  bindOrderActions();
+}
+
+/* 移动端汉堡 */
+const burger = $('#navBurger');
+const sheet = $('#navSheet');
+if (burger && sheet) {
+  const closeSheet = () => { sheet.classList.remove('open'); burger.classList.remove('open'); burger.setAttribute('aria-expanded', 'false'); };
+  burger.addEventListener('click', () => {
+    const open = !sheet.classList.contains('open');
+    sheet.classList.toggle('open', open);
+    burger.classList.toggle('open', open);
+    burger.setAttribute('aria-expanded', String(open));
+  });
+  sheet.addEventListener('click', (e) => { if (e.target.closest('a')) closeSheet(); });
+  document.addEventListener('click', (e) => { if (!e.target.closest('#navBurger') && !e.target.closest('#navSheet')) closeSheet(); });
+  window.addEventListener('resize', () => { if (window.innerWidth > 1199) closeSheet(); });
+}
+
+/* 入场动画：与官网同口径的位置扫描（本页不引 app.js，自己实现一遍）。
+   刻意不用 IntersectionObserver：锚点直达 / 快速滚动时回调时机不可靠。 */
+const revealables = $$('.reveal');
+const sweepReveal = () => {
+  const h = window.innerHeight;
+  for (const el of revealables) {
+    if (el.classList.contains('in')) continue;
+    const r = el.getBoundingClientRect();
+    if (r.top < h - 40 && r.bottom > 0) el.classList.add('in');
+  }
+};
+window.addEventListener('scroll', sweepReveal, { passive: true });
+window.addEventListener('resize', sweepReveal, { passive: true });
+sweepReveal();
+setTimeout(sweepReveal, 300);
+// 兜底：短页面（一屏放得下）也必须可见
+setTimeout(() => revealables.forEach((el) => el.classList.add('in')), 1200);
+
+load();
+</script>
+</body>
+</html>

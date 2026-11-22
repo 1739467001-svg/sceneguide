@@ -47,7 +47,17 @@ bold "三维问路 · SceneGuide 验收"
 bold "目标：$BASE"
 
 # ── 0. 服务可达 ────────────────────────────────────────────
-step "0. 服务可达性"
+step "0. 离线协议自检（不依赖沙箱）"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if node "$SCRIPT_DIR/smoke.js" > /tmp/sg-smoke.log 2>&1; then
+  SMOKE_N=$(grep -c '✓' /tmp/sg-smoke.log || true)
+  ok "离线自检全部通过（${SMOKE_N} 项：场景内核 / 402 协议 / 商家签名 / 幂等 / 内核边界回归）"
+else
+  bad "离线自检存在失败项（node scripts/smoke.js 查看详情）"
+  tail -5 /tmp/sg-smoke.log | sed 's/^/      /'
+fi
+
+step "1. 服务可达性"
 if "${CURL[@]}" -o /dev/null -w '%{http_code}' "$BASE/healthz" | grep -q '^200$'; then
   ok "GET /healthz → 200"
 else
@@ -337,6 +347,15 @@ else
   bad "llms.txt 缺少关键协议说明"
 fi
 
+# 深层路径 404：子路径部署下资源引用必须被改写成相对路径（线上实测过绝对路径裸奔）
+DEEP=$("${CURL[@]}" -o /dev/null -w '%{http_code}' "$BASE/deep/path/here")
+DEEP_CSS=$("${CURL[@]}" "$BASE/deep/path/here" | grep -c 'href="\.\./\.\./styles.css"')
+if [[ "$DEEP" == "404" && "$DEEP_CSS" == "1" ]]; then
+  ok "深层路径 404 页资源引用为相对路径（../../styles.css，子路径部署不裸奔）"
+else
+  bad "深层 404 页引用异常：HTTP $DEEP，相对引用计数 $DEEP_CSS"
+fi
+
 # ── 11. 权益额度台账（多额度商品必须真的交付 N 次）──────────
 step "11. 权益额度台账（十次导览包）"
 ECJ=$(mktemp)
@@ -518,6 +537,67 @@ fi
 # 桌面应用引导：当前环境必须给出诚实的安装路径
 INSTALL=$("${CURL[@]}" "$BASE/" 2>/dev/null | grep -c 'id="installHint"')
 if [[ "$INSTALL" == "1" ]]; then ok "桌面应用形态引导位存在（按安全上下文给诚实路径）"; else bad "缺少桌面应用引导"; fi
+
+# ── 15. 演示视频与无障碍 ─────────────────────────────────────
+step "15. 演示视频与无障碍"
+for path in /media/demo.mp4 /media/demo-poster.png /introduction.html; do
+  CODE=$("${CURL[@]}" -o /dev/null -w '%{http_code}' "$BASE$path")
+  if [[ "$CODE" == "200" ]]; then ok "GET $path → 200"; else bad "GET $path → $CODE"; fi
+done
+ALIVE=$("${CURL[@]}" "$BASE/" | grep -c 'aria-live="polite"')
+if [[ "$ALIVE" == "1" ]]; then ok "结果区 aria-live（读屏可达）"; else bad "结果区缺 aria-live"; fi
+
+# ── 16. MCP Agent 链路（tools/list → 真实 402 → 沙箱收银 → 带凭证交付 → 幂等重放）──
+step "16. MCP Agent 链路（端到端）"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if BASE_URL="$BASE" node "$SCRIPT_DIR/verify-mcp-flow.mjs" > /tmp/sg-mcp-flow.log 2>&1; then
+  MCP_N=$(grep -c '✓' /tmp/sg-mcp-flow.log || true)
+  ok "MCP Agent 链路全部通过（${MCP_N} 项，见 scripts/verify-mcp-flow.mjs）"
+else
+  bad "MCP Agent 链路存在失败项（node scripts/verify-mcp-flow.mjs 查看详情）"
+  tail -5 /tmp/sg-mcp-flow.log | sed 's/^/      /'
+fi
+
+# ── 17. 买家账户中心（买包 → 转赠 → 兑换 → 余额交付 → 撤销 → 退款回收）──
+step "17. 买家账户中心（端到端）"
+if BASE_URL="$BASE" node "$SCRIPT_DIR/verify-account-flow.mjs" > /tmp/sg-acct-flow.log 2>&1; then
+  ACCT_N=$(grep -c '✓' /tmp/sg-acct-flow.log || true)
+  ok "买家账户中心全部通过（${ACCT_N} 项，见 scripts/verify-account-flow.mjs）"
+else
+  bad "买家账户中心存在失败项（node scripts/verify-account-flow.mjs 查看详情）"
+  tail -5 /tmp/sg-acct-flow.log | sed 's/^/      /'
+fi
+
+# ── 18. 机构采购留资（B 端入口）─────────────────────────────
+step "18. 机构采购留资（B 端入口）"
+LEAD=$("${CURL[@]}" -X POST "$BASE/api/v1/leads" -H 'Content-Type: application/json' \
+  -d '{"org":"验收机构","contact":"wechat:verify","scale":"40人×10次","note":"脚本自测"}' 2>/dev/null)
+if echo "$LEAD" | grep -q '"ok":true'; then ok "合法留资被接受"; else bad "合法留资被拒：$LEAD"; fi
+LEAD_BAD=$("${CURL[@]}" -X POST "$BASE/api/v1/leads" -H 'Content-Type: application/json' \
+  -d '{"org":"只有机构名"}' 2>/dev/null)
+if echo "$LEAD_BAD" | grep -q '联系方式'; then ok "缺联系方式被拒（400）"; else bad "缺联系方式未被拒：$LEAD_BAD"; fi
+LEAD_LONG=$("${CURL[@]}" -X POST "$BASE/api/v1/leads" -H 'Content-Type: application/json' \
+  -d "{\"org\":\"$(printf 'x%.0s' $(seq 1 100))\",\"contact\":\"y\"}" 2>/dev/null)
+if echo "$LEAD_LONG" | grep -q '60 字以内'; then ok "超长机构名被拒（长度校验）"; else bad "超长未被拒：$LEAD_LONG"; fi
+
+# ── 19. 数据库体检（损坏必须早发现：支付链路会静默变 500）─────────
+step "19. 数据库体检"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if node "$SCRIPT_DIR/db-check.mjs" > /tmp/sg-db-check.log 2>&1; then
+  ok "orders.db 与 analytics.db 体检通过（node scripts/db-check.mjs）"
+else
+  bad "数据库体检未通过——按 /tmp/sg-db-check.log 里的步骤恢复"
+  tail -5 /tmp/sg-db-check.log | sed 's/^/      /'
+fi
+
+# ── 20. 三维渲染完整性（浏览器层：建筑对齐 + 无 NaN 黑屏）────────
+step "20. 三维渲染完整性（浏览器层）"
+if node "$SCRIPT_DIR/verify-render.mjs" > /tmp/sg-render.log 2>&1; then
+  ok "三维渲染完整性通过（建筑对齐 footprint / demo-park 不黑屏，见 scripts/verify-render.mjs）"
+else
+  bad "三维渲染完整性存在失败项（node scripts/verify-render.mjs 查看详情）"
+  tail -5 /tmp/sg-render.log | sed 's/^/      /'
+fi
 
 # ── 汇总 ────────────────────────────────────────────────────
 printf '\n%s\n' "────────────────────────────────────────────────────────"

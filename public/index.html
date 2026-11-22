@@ -10,7 +10,7 @@
 <meta property="og:description" content="基于真实地理拓扑的场景导览服务。Agent 自行完成支付，按次计费，用量可核验。" />
 <meta property="og:type" content="website" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%232f7bff'/%3E%3Ctext x='16' y='22' font-size='16' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'%3E三%3C/text%3E%3C/svg%3E" />
-<link rel="stylesheet" href="styles.css?v=20261108-ui1" />
+<link rel="stylesheet" href="styles.css?v=20261122-pn1" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#070b16" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -33,6 +33,7 @@
     </a>
     <div class="nav-links">
       <a href="#demo">实时演示</a>
+      <a href="#transaction">交易链路</a>
       <a href="#protocol">支付链路</a>
       <a href="#deliverables">交付验收</a>
       <a href="#tracks">赛道契合</a>
@@ -40,7 +41,6 @@
       <a href="#wall">社区反馈</a>
       <a href="#api">API 参考</a>
       <a href="#engineering">工程细节</a>
-      <a href="#about">关于</a>
       <a href="#demo" class="nav-cta">立即体验</a>
     </div>
     <button class="nav-burger" id="navBurger" aria-label="打开导航" aria-expanded="false">
@@ -48,6 +48,7 @@
     </button>
     <nav class="nav-sheet" id="navSheet" aria-label="移动端导航">
       <a href="#demo">实时演示</a>
+      <a href="#transaction">交易链路</a>
       <a href="#protocol">支付链路</a>
       <a href="#deliverables">交付验收</a>
       <a href="#tracks">赛道契合</a>
@@ -65,6 +66,13 @@
 <!-- ══════════════════════════ Hero ══════════════════════════ -->
 <main id="main">
 <header class="hero" id="top">
+  <!-- 装饰：一条正在被「测绘」的路线。纯 SVG，无请求、无依赖 -->
+  <svg class="hero-route" viewBox="0 0 640 430" fill="none" aria-hidden="true">
+    <path class="hr-path" pathLength="100" d="M28 372 C 108 372, 126 286, 208 286 S 318 330, 372 252 S 492 148, 614 96" />
+    <path class="hr-measure" d="M28 372 C 108 372, 126 286, 208 286 S 318 330, 372 252 S 492 148, 614 96" />
+    <circle class="hr-dot" cx="28" cy="372" r="4.5" />
+    <circle class="hr-dot hr-dot-end" cx="614" cy="96" r="4.5" />
+  </svg>
   <div class="wrap hero-grid">
     <div>
       <span class="contest-badge">
@@ -99,15 +107,22 @@
     </div>
 
     <!-- 真实协议终端：内容由 /data/protocol-trace.json 填充 -->
-    <div class="terminal reveal in" aria-label="真实 402 协议往返报文">
-      <div class="term-bar">
-        <span class="term-dots"><i></i><i></i><i></i></span>
-        <span class="term-title">scene-guide · A2M 402 协议实测</span>
+    <div class="terminal-wrap">
+      <div class="terminal reveal in" aria-label="真实 402 协议往返报文">
+        <div class="term-bar">
+          <span class="term-dots"><i></i><i></i><i></i></span>
+          <span class="term-title">scene-guide · A2M 402 协议实测</span>
+        </div>
+        <div class="term-body" id="termBody">载入报文…</div>
+        <div class="term-foot" id="termFoot"></div>
       </div>
-      <div class="term-body" id="termBody">载入报文…</div>
-      <div class="term-foot" id="termFoot"></div>
+      <!-- 悬浮协议签：把三个关键报文名挂在终端旁，装饰性，不承载信息 -->
+      <span class="hero-chip c1" aria-hidden="true">402 Payment Required</span>
+      <span class="hero-chip c2" aria-hidden="true">Payment-Proof</span>
+      <span class="hero-chip c3" aria-hidden="true">geometryHash · sha256</span>
     </div>
   </div>
+  <div class="scroll-cue" aria-hidden="true"><span>向下滚动</span><i></i></div>
 </header>
 
 <!-- ══════════════════════════ 差异 ══════════════════════════ -->
@@ -201,12 +216,13 @@
           <button type="button" data-view="3d" class="active">三维场景</button>
           <button type="button" data-view="2d">拓扑平面图</button>
           <button type="button" id="resetView" class="ghost">重置视角</button>
-          <span class="view-hint" id="viewHint">左键旋转 · 右键平移 · 滚轮缩放</span>
+          <span class="view-hint" id="viewHint">左键旋转 · 右键平移 · 滚轮缩放 · <b>键盘：</b>方向键 / +− / 0</span>
         </div>
 
         <div class="mode-row">
           <select id="sceneSel" aria-label="切换场景" title="切换场景（同一套管线从 OpenStreetMap 构建）"></select>
           <div class="seg" id="modeSeg" role="group" aria-label="交付模式">
+            <span class="seg-thumb" aria-hidden="true"></span>
             <button type="button" data-mode="guide" class="active">导览问答 · ¥0.50</button>
             <button type="button" data-mode="quest">研学任务 · ¥9.90</button>
           </div>
@@ -218,6 +234,12 @@
           </select>
           <span class="mode-hint" id="modeHint"></span>
         </div>
+        <p class="price-note">
+          价格口径：本演示站当前运行在<b>支付宝沙箱</b>环境，实收 <b>¥0.01/次</b>（沙箱 mock 服务注册价固定）。
+          生产价 <b>¥0.50/次 · ¥4.50 十次包 · ¥9.90 研学任务</b> 已按「注册价必须等于实收价」的平台约束在
+          <code>config/services.json</code> 配置就绪，待生产 <code>service_id</code> 审核通过后自动生效——
+          平台硬约束是 <code>SERVICE_PRICE_MISMATCH</code>：注册价与实收价不一致直接拒单。
+        </p>
         <div class="ask">
           <input id="q" type="text" autocomplete="off" spellcheck="false"
                  placeholder="例如：从A教学楼到C教学楼怎么走" />
@@ -230,23 +252,29 @@
 
       <div>
         <div class="panel panel-tight" id="entPanel" style="margin-bottom:14px">
-          <div style="font-size:12px;color:var(--text-faint);letter-spacing:.05em;text-transform:uppercase;margin-bottom:10px">我的权益额度</div>
+          <div class="label-cap">我的权益额度</div>
           <div id="entBody"><div class="skeleton-text">加载中…</div></div>
+          <a href="account.html" style="display:inline-block;margin-top:10px;font-size:12.5px">我的账户：订单 / 转赠 / 退款 →</a>
         </div>
         <div class="panel panel-tight" style="margin-bottom:14px">
-          <div style="font-size:12px;color:var(--text-faint);letter-spacing:.05em;text-transform:uppercase;margin-bottom:10px">服务档位</div>
+          <div class="label-cap">服务档位</div>
           <table class="data" id="tierTable"><tbody></tbody></table>
         </div>
         <div class="panel panel-tight">
-          <div style="font-size:12px;color:var(--text-faint);letter-spacing:.05em;text-transform:uppercase;margin-bottom:10px">实时订单与用量</div>
+          <div class="label-cap">实时订单与用量</div>
           <table class="data" id="statsTable"><tbody></tbody></table>
         </div>
       </div>
     </div>
 
-    <div class="result reveal" id="result">
+    <div class="result reveal" id="result" aria-live="polite">
       <div class="result-empty"><span class="spinner" style="animation:none;opacity:.4"></span>正在初始化场景与路由…</div>
     </div>
+
+    <details class="demo-video reveal">
+      <summary>▶ 观看 77 秒功能演示（生产环境实拍：支付 → 交付 → 核验 → 证书）</summary>
+      <video controls preload="metadata" poster="media/demo-poster.png" src="media/demo.mp4"></video>
+    </details>
   </div>
 </section>
 
@@ -266,70 +294,66 @@
 
     <div class="grid split-grid reveal" style="margin-top:18px;align-items:start">
       <div class="panel">
-        <h3 style="font-size:15px;margin-bottom:16px">验收清单 · 可自行执行</h3>
+        <h3 class="panel-title">验收清单 · 可自行执行</h3>
         <ol class="verify-list" id="verifyList"></ol>
       </div>
 
       <div class="panel">
-        <h3 style="font-size:15px;margin-bottom:6px">一键跑完上面所有验收</h3>
-        <p style="font-size:13px;color:var(--text-dim);margin-bottom:14px">
+        <h3 class="panel-title panel-title-sm">一键跑完上面所有验收</h3>
+        <p class="panel-note">
           验收脚本随作品一起交付。它会真的发起支付、真的查订单状态、真的解码协议头——
-          右侧输出为 <b>2026-11-06 真实运行捕获</b>（39 项，含打卡闭环与增长归因）。
+          右侧输出为 <b>2026-11-20 真实运行捕获</b>（76 项：402 全链路 / 幂等履约 / 额度台账 / 打卡闭环 / 增长归因 / MCP Agent 链路 / 买家账户中心 / 机构采购留资 / 深层 404 / 数据库体检 / 离线协议自检 69 项 / 三维渲染完整性）。
         </p>
         <div class="codeblock">
           <div class="codeblock-head"><span>scripts/verify.sh</span>
             <button class="copy-btn" data-copy="#verifyCode">复制</button></div>
-          <pre id="verifyCode"><code>三维问路 · SceneGuide 验收
+          <pre id="verifyCode"><code>
+三维问路 · SceneGuide 验收
 目标：http://127.0.0.1:3000
 
-▸ 0. 服务可达性
+▸ 0. 离线协议自检（不依赖沙箱）
+  ✓ 离线自检全部通过（69 项：场景内核 / 402 协议 / 商家签名 / 幂等 / 内核边界回归）
+▸ 1. 服务可达性
   ✓ GET /healthz → 200
-
 ▸ 1. 付费资源返回 402 支付挑战
   ✓ 状态码 402 Payment Required
   ✓ 响应头含 Payment-Needed
-  ✓ Payment-Needed 可解码（out_trade_no=SG_1793985165709_ee622cdeda2e amount=0.01 service_id=api_mock_service_id seller_id=2088721118741530）
-
+  ✓ Payment-Needed 可解码（out_trade_no=SG_1795224392926_558161001204 amount=0.01 service_id=api_mock_service_id seller_id=2088721118741530）
 ▸ 2. 完成支付并交付资源
-  ✓ 支付完成，支付宝交易号 20261107008281011204280000022439（32 位）
+  ✓ 支付完成，支付宝交易号 20261121008281092604280000034699（32 位）
   ✓ 交付内容含导览答案
-
 ▸ 3. 幂等履约
   ✓ 订单状态 PAID/FULFILLED（重复请求不会重复生成资源）
-
 ▸ 4. 用量计量
   ✓ 计量维度 guide_call 有累计
   ✓ 计量维度 tokens 有累计
   ✓ 计量维度 distance_m 有累计
-
 ▸ 5. 场景数据与可核验性
   ✓ 命名地标 134 个（OSM 真实数据）
   ✓ 建筑多边形轮廓 113 个（可拉伸为体块）
   ✓ 标注了 OSM 版权归属（ODbL）
-
+  ✓ 第二真实场景「良渚文化村」（36 地标）—— 同一 OSM 管线可泛化
 ▸ 6. 站点协议报文快照
   ✓ protocol-trace.json 可访问（真实抓取的 402 往返报文）
-
 ▸ 7. Agent 发现服务（MCP tools/list）
   ✓ MCP tools/list 返回 scene_guide（Agent 可发现）
   ✓ MCP 同时暴露 scene_guide_scenes（先选场景再问路）
   ✓ 工具标注 paid=true（Agent 宿主可提示计费）
-
+  ✓ MCP tools/call 免费工具直接交付场景目录
+  ✓ MCP 付费工具返回 payment_required + 账单（Agent 采购链路第一环）
 ▸ 8. 场景任务（研学档位）
   ✓ 任务生成：线索链与打卡点一一对应，完成前状态为进行中且无证书
-  ✓ 任务走真实支付：交易号 20261107008281011204280000022440
+  ✓ 任务走真实支付：交易号 20261121008281092604280000034700
   ✓ 任务计量含 clue_count 维度
   ✓ 非法打卡被拒（UNKNOWN_POINT）——顺序核验生效
-  ✓ 按序打卡 3 站后颁发证书：sha256:d483be2d5e05d7625c53441a08c80eb2
+  ✓ 按序打卡 3 站后颁发证书：sha256:c99d690cde565b7b6518c028e3e994f9
   ✓ 未完成时不含证书——证书只在走完之后颁发
-
 ▸ 9. 增长归因与免费试看
-  ✓ 渠道访问 /?ref=verify-1793985170（首触归因）
+  ✓ 渠道访问 /?ref=verify-1795224398（首触归因）
   ✓ 免费试看前 3 次放行
   ✓ 第 4 次被限流（429）——服务端计数生效
-  ✓ 漏斗看板含该渠道
-  ✓ 反刷量口径：自测付费单独标注（15 笔）
-
+  ✓ 漏斗归因：测试访客计入 (测试渠道) 聚合行
+  ✓ 反刷量口径：自测付费单独标注（186 笔）
 ▸ 10. 站点完整性
   ✓ GET / → 200
   ✓ GET /styles.css → 200
@@ -342,9 +366,52 @@
   ✓ GET /icon-192.png → 200
   ✓ GET /icon-512.png → 200
   ✓ GET /404.html → 200
-
+  ✓ GET /llms.txt → 200
+  ✓ GET /introduction.html → 200
+  ✓ llms.txt 面向 Agent 描述了 402 调用与支付流程
+  ✓ 深层路径 404 页资源引用为相对路径（../../styles.css，子路径部署不裸奔）
+▸ 11. 权益额度台账（十次导览包）
+  ✓ 购买十次包：发放 10 次，本次交付用掉 1 次，余额 9 次
+  ✓ 额度查询接口返回一致（余额 9 / 发放 10 / 已用 1）
+  ✓ 额度内 3 次调用免支付直交付（HTTP 200），余额依次递减至 6
+  ✓ 额度耗尽后回到 402 支付挑战（不会白送，也不会重复收费）
+▸ 12. 社区反馈墙
+  ✓ GET /api/v1/feedback → 200
+  ✓ 提交留言成功（id=61）
+  ✓ 非法留言被拒（400）——内容长度校验生效
+  ✓ 点赞成功且按访客去重（likes=1 liked=true）
+  ✓ 再次点赞为取消（likes=0）——同一访客不能刷赞
+  ✓ 回复可写入（反馈墙是线程，不只是评论列表）
+  ✓ 举报累计 3 次自动隐藏（反刷量：不同访客各自举报，不给一键下架）
+  ✓ 发布者可以撤回自己的留言（不留测试垃圾在墙上）
+  ✓ 撤回后不再出现在反馈墙
+▸ 13. 订单核验卡
+  ✓ 已支付订单出具核验卡（脱敏交易号 + 距离 + 证据哈希，无答案内容）
+  ✓ verify.html 可访问（分享落地页）
+  ✓ 不存在订单返回 404（不可探测订单状态细节）
+▸ 14. 周维度热度
+  ✓ 漏斗含近 7 天周维度（新访客 / 付费 / 其中真实 / 收入）
+  ✓ 桌面应用形态引导位存在（按安全上下文给诚实路径）
+▸ 15. 演示视频与无障碍
+  ✓ GET /media/demo.mp4 → 200
+  ✓ GET /media/demo-poster.png → 200
+  ✓ GET /introduction.html → 200
+  ✓ 结果区 aria-live（读屏可达）
+▸ 16. MCP Agent 链路（端到端）
+  ✓ MCP Agent 链路全部通过（21 项，见 scripts/verify-mcp-flow.mjs）
+▸ 17. 买家账户中心（端到端）
+  ✓ 买家账户中心全部通过（17 项，见 scripts/verify-account-flow.mjs）
+▸ 18. 机构采购留资（B 端入口）
+  ✓ 合法留资被接受
+  ✓ 缺联系方式被拒（400）
+  ✓ 超长机构名被拒（长度校验）
+▸ 19. 数据库体检
+  ✓ orders.db 与 analytics.db 体检通过（node scripts/db-check.mjs）
+▸ 20. 三维渲染完整性（浏览器层）
+  ✓ 三维渲染完整性通过（建筑对齐 footprint / demo-park 不黑屏，见 scripts/verify-render.mjs）
 ────────────────────────────────────────────────────────
-全部通过：39 项</code></pre>
+全部通过：76 项
+</code></pre>
         </div>
       </div>
     </div>
@@ -368,7 +435,7 @@
 
       <div class="panel" style="position:sticky;top:84px">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px">
-          <strong style="font-size:14px">真实报文</strong>
+          <strong class="trace-title">真实报文</strong>
           <span class="tag" id="traceTag">加载中…</span>
         </div>
         <div id="traceView"></div>
@@ -403,7 +470,7 @@
         下列赛道描述为 PAYATHON 2026 官方原文。同一套场景内核按不同交付形态打包，
         分别投不同赛道——它们是四种交付物，不是一份物料换四个赛道。
       </p>
-      <p style="margin-top:14px;padding:14px 16px;border-radius:10px;background:var(--surface);border:1px solid var(--border);font-size:14px">
+      <p class="callout-box">
         <b style="color:var(--text)">为什么这样分配：</b>
         <b>Machine Pay 是主赛道</b>——本作品对支付宝 A2M 智能收（HTTP 402）的接入做到了官方产品级：
         402 挑战、凭证验签、履约回执全部在官方沙箱端到端跑通，这是四条线里实现最完整的一条；
@@ -430,7 +497,7 @@
 
     <div class="grid g2 reveal" style="align-items:start">
       <div class="panel">
-        <h3 style="font-size:15px;margin-bottom:14px">计费口径</h3>
+        <h3 class="panel-title">计费口径</h3>
         <table class="data">
           <thead><tr><th>计量项</th><th>单位</th><th class="n">含义</th></tr></thead>
           <tbody>
@@ -449,17 +516,17 @@
       </div>
 
       <div class="panel">
-        <h3 style="font-size:15px;margin-bottom:14px">可交付的两种商品</h3>
+        <h3 class="panel-title">可交付的两种商品</h3>
         <div class="feature" style="margin-bottom:12px">
-          <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px">
-            <h4 style="margin:0">单次导览</h4>
+          <div class="feature-head">
+            <h4>单次导览</h4>
             <span class="tag cyan">按次</span>
           </div>
           <p>一次问答式的场景导览。<b>低门槛、可冲动消费</b>，适合 Agent 高频调用。</p>
         </div>
         <div class="feature">
-          <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px">
-            <h4 style="margin:0">场景任务</h4>
+          <div class="feature-head">
+            <h4>场景任务</h4>
             <span class="tag amber">可交付的教育产品</span>
           </div>
           <p>
@@ -475,11 +542,37 @@
     </div>
 
     <div class="panel reveal" style="margin-top:18px">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px">
-        <h3 style="font-size:15px;margin:0">渠道转化看板 · 真实访客归因</h3>
+      <div class="panel-head">
+        <h3>机构 / 团体采购</h3>
+        <span class="tag violet">B 端对接</span>
+      </div>
+      <p class="panel-note">
+        研学机构、学校社团、企业团建按「十次导览包」批量采购：次数余额可整包发放，
+        也能拆成<b>礼品码</b>分发给学员——每人一个码，在任意设备兑换即可用。
+        留下对接方式，我们会主动联系（可开收据、可对公、可按活动定制打卡路线）。
+      </p>
+      <form id="leadForm" autocomplete="off">
+        <div class="fb-row">
+          <input id="leadOrg" type="text" maxlength="60" placeholder="机构 / 团队名称（必填）" />
+          <input id="leadContact" type="text" maxlength="80" placeholder="联系方式：微信 / 邮箱 / 手机号（必填）" />
+        </div>
+        <div class="fb-row">
+          <input id="leadScale" type="text" maxlength="40" placeholder="预计规模（如：40 人 × 10 次）" />
+          <input id="leadNote" type="text" maxlength="300" placeholder="备注（可选）：场景 / 时间 / 定制需求" />
+        </div>
+        <div class="fb-submit-row">
+          <button class="btn btn-primary" type="submit" id="leadSubmit">提交采购意向</button>
+          <span class="fb-note">联系方式仅用于本次采购对接，不会出现在任何公开页面。</span>
+        </div>
+      </form>
+    </div>
+
+    <div class="panel reveal" style="margin-top:18px">
+      <div class="panel-head">
+        <h3>渠道转化看板 · 真实访客归因</h3>
         <span class="tag cyan" id="funnelTag">加载中…</span>
       </div>
-      <p style="font-size:13px;color:var(--text-dim);margin-bottom:14px">
+      <p class="panel-note">
         每个访客一个随机 cookie（不存任何个人信息，IP 只存加盐哈希），
         首触渠道归因；每笔订单关联访客与来源。
         <b>反刷量口径</b>：来源为 <code>demo</code> 的是沙箱自测代付，永远不计入「真实付费用户」；
@@ -515,8 +608,8 @@
 
     <div class="grid g2 reveal" style="align-items:start">
       <div class="panel">
-        <h3 style="font-size:15px;margin-bottom:6px">留下你的反馈</h3>
-        <p style="font-size:12.5px;color:var(--text-faint);margin-bottom:14px">
+        <h3 class="panel-title panel-title-sm">留下你的反馈</h3>
+        <p class="panel-note panel-note-faint">
           称呼与身份都是自愿填写的；服务器只存加盐后的 IP 哈希，不存 IP 原文、不存任何联系方式。
           每人每天最多 3 条反馈，点赞按访客去重。
         </p>
@@ -534,7 +627,7 @@
             </select>
           </div>
           <div class="fb-rating" id="fbRating" role="group" aria-label="评分">
-            <span style="font-size:12.5px;color:var(--text-dim);margin-right:4px">评分（可选）</span>
+            <span class="fb-rating-label">评分（可选）</span>
             <button type="button" data-star="1">★</button>
             <button type="button" data-star="2">★</button>
             <button type="button" data-star="3">★</button>
@@ -544,16 +637,16 @@
           </div>
           <textarea id="fbContent" rows="4" maxlength="500"
                     placeholder="说点具体的：哪一步好用？哪里卡住了？路线对不对？"></textarea>
-          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div class="fb-submit-row">
             <button class="btn btn-primary" type="submit" id="fbSubmit">发布反馈</button>
-            <span style="font-size:12px;color:var(--text-faint)" id="fbNote"></span>
+            <span class="fb-note" id="fbNote"></span>
           </div>
         </form>
       </div>
 
       <div class="panel">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px">
-          <h3 style="font-size:15px;margin:0">反馈墙</h3>
+        <div class="panel-head">
+          <h3>反馈墙</h3>
           <span class="tag cyan" id="fbCount">加载中…</span>
         </div>
         <div id="fbList"><div class="skeleton-text">加载中…</div></div>
@@ -792,7 +885,7 @@ fulfill_status: UNFULFILLED ──► PENDING_CONFIRM ──► FULFILLED
           并在响应里用 <code>route.type</code> 与 <code>measured</code> 字段说清楚。宁可少一点，也不假装。
         </p>
 
-        <div class="metrics" style="margin-top:18px;padding:16px;border-radius:12px;background:var(--bg-deep);border:1px solid var(--border)">
+        <div class="metrics metrics-box">
           <div class="metric"><div class="k">命名地标（去重）</div><div class="v num" id="connLandmarks">—</div></div>
           <div class="metric"><div class="k">存在实测步道的点对</div><div class="v num" id="connPairs">—</div></div>
           <div class="metric"><div class="k">连通分量</div><div class="v num" id="connComps">—</div></div>
@@ -860,13 +953,16 @@ fulfill_status: UNFULFILLED ──► PENDING_CONFIRM ──► FULFILLED
 <!-- ══════════════════════════ 页脚 ══════════════════════════ -->
 <footer>
   <div class="wrap footer-grid">
-    <div>
-      <div style="color:var(--text-dim);font-weight:600;margin-bottom:6px">三维问路 · SceneGuide</div>
-      <div>可被 Agent 自动购买的场景导览服务 · PAYATHON 2026 · 支付宝 AI 付黑客松</div>
-      <div style="margin-top:6px">场景数据 © OpenStreetMap contributors (ODbL) ｜ 支付能力：支付宝 AI 付 AI 按量付费（A2M 智能收）</div>
+    <div class="footer-brand">
+      <div class="footer-brand-title">三维问路 · SceneGuide</div>
+      <div class="footer-brand-sub">可被 Agent 自动购买的场景导览服务</div>
+      <div class="footer-attr">PAYATHON 2026 · 支付宝 AI 付黑客松</div>
+      <div class="footer-attr">场景数据 © OpenStreetMap contributors (ODbL) ｜ 支付能力：支付宝 AI 付 A2M 智能收</div>
     </div>
-    <div class="footer-links">
+    <nav class="footer-links" aria-label="页脚导航">
+      <span class="footer-col-title">板块</span>
       <a href="#demo">实时演示</a>
+      <a href="#transaction">交易链路</a>
       <a href="#protocol">支付链路</a>
       <a href="#deliverables">交付验收</a>
       <a href="#tracks">赛道契合</a>
@@ -875,19 +971,26 @@ fulfill_status: UNFULFILLED ──► PENDING_CONFIRM ──► FULFILLED
       <a href="#api">API 参考</a>
       <a href="#engineering">工程细节</a>
       <a href="#about">关于</a>
+    </nav>
+    <nav class="footer-links" aria-label="材料与赛事">
+      <span class="footer-col-title">买家</span>
+      <a href="account.html">我的账户（订单 / 额度 / 转赠 / 退款）</a>
+      <span class="footer-col-title" style="margin-top:14px">材料与赛事</span>
       <a href="introduction.html" target="_blank" rel="noopener">作品介绍（评委版）</a>
       <a href="https://aipay.alipay.com/community/events/payathon-2026" target="_blank" rel="noopener">赛事官网 ↗</a>
-    </div>
+    </nav>
   </div>
   <!-- 桌面应用形态（Vibe Pay）：按运行环境给诚实的安装路径，内容由 app.js 填充 -->
   <div class="wrap" style="margin-top:18px">
-    <div class="notice notice-blue" style="font-size:12.5px;line-height:1.8">
+    <div class="notice notice-blue install-hint">
       <b>桌面应用形态</b>：<span id="installHint">加载中…</span>
     </div>
   </div>
 </footer>
 
+<button class="back-top" id="backTop" aria-label="回到顶部" hidden>↑</button>
+
 <!-- 静态资源带版本号：这个站的 JS 就是作品本体，任何缓存命中都会让评委看到旧版本 -->
-<script src="app.js?v=20261119-ui16"></script>
+<script src="app.js?v=20261120-ui19"></script>
 </body>
 </html>

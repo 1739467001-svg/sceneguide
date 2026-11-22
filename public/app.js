@@ -231,44 +231,54 @@
 
   const cv = $('#map');
   const ctx = cv.getContext('2d');
+  // 最后一次有效的 CSS 尺寸（画布 hidden 时 getBoundingClientRect 全为 0）
+  let cssW = 0;
+  let cssH = 0;
 
   function resizeCanvas() {
     if (!cv) return;
     const r = cv.getBoundingClientRect();
+    // 🔴 hidden 时直接返回：旧实现在 hidden 状态下把 cv.width 打成 1
+    //    （round(0 × dpr)），之后 fitView 读到 1 → k 为负 → 地图镜像+坍缩，
+    //    且切回 2D 只 resizeCanvas 不 fitView，坏视图一直留着（实测复现）。
+    if (r.width < 2 || r.height < 2) return;
+    cssW = r.width;
+    cssH = r.height;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    cv.width = Math.max(1, Math.round(r.width * dpr));
-    cv.height = Math.max(1, Math.round(r.height * dpr));
+    cv.width = Math.max(1, Math.round(cssW * dpr));
+    cv.height = Math.max(1, Math.round(cssH * dpr));
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     draw();
   }
 
   function fitView() {
     if (!state.scene?.graph) return;
-    // 🔴 场景切换发生在 3D 视图下时，2D canvas 处于 hidden——
-    //    getBoundingClientRect 会返回 0，缩放/平移全被算成负数，
-    //    切回 2D 就是「所有点挤在角落」（实测：良渚 2D 首切必现）。
-    //    hidden 时退回画布内部分辨率，保证 fitView 数学仍然成立。
-    const rect = cv.getBoundingClientRect();
-    const w = rect.width || cv.width || 800;
-    const h = rect.height || cv.height || 600;
+    // 🔴 hidden 兜底用「最后一次有效 CSS 尺寸」，绝不退回 cv.width：
+    //    cv.width 是**设备像素**（= CSS 宽 × dpr），而 view.x/y/k 全活在 CSS 像素空间。
+    //    DPR=2 时用 cv.width 会让场景中心被画到画布右边缘、内容一半被裁
+    //    （实测：retina Mac + 默认 3D 视图 + 换场景 = 三步必现）。
+    const w = cssW || 800;
+    const h = cssH || 600;
 
-    // 以「命名地标」的分布来取景，而不是全部路网节点：
-    // OSM 里常有孤立的路段碎片，它们会把包围盒撑大，导致主体被压成一小团。
+    // 空数据防护：nodes/pois 都空时 Math.min(...[]) = Infinity → view 全 NaN →
+    // 画布空白且按 0 也救不回（违反文件头「交互失败必须有可读错误态」的承诺）。
     const pois = state.scene.pois ?? [];
-    let minX, maxX, minY, maxY;
-    if (pois.length) {
-      const xs = pois.map((p) => p.xy[0]);
-      const ys = pois.map((p) => p.xy[1]);
-      minX = Math.min(...xs); maxX = Math.max(...xs);
-      minY = Math.min(...ys); maxY = Math.max(...ys);
-    } else {
-      const ns = state.scene.graph.nodes;
-      minX = Math.min(...ns.map((n) => n[0])); maxX = Math.max(...ns.map((n) => n[0]));
-      minY = Math.min(...ns.map((n) => n[1])); maxY = Math.max(...ns.map((n) => n[1]));
+    const ns = state.scene.graph.nodes ?? [];
+    const src = pois.length ? pois.map((p) => p.xy) : ns;
+    if (!src.length) {
+      setError('该场景暂无路网数据', 'OSM 抓取未返回节点，请稍后重试或切换其它场景。');
+      return;
     }
+    const xs = src.map((p) => p[0]);
+    const ys = src.map((p) => p[1]);
+    const minX = Math.min(...xs); const maxX = Math.max(...xs);
+    const minY = Math.min(...ys); const maxY = Math.max(...ys);
 
     const pad = 54;
-    const k = Math.min((w - pad * 2) / Math.max(1, maxX - minX), (h - pad * 2) / Math.max(1, maxY - minY));
+    // k 钳制与 wheel/键盘路径同一组边界（0.2–8），避免出现负 k 或 1e12 坐标
+    const k = Math.max(0.2, Math.min(8,
+      Math.min((w - pad * 2) / Math.max(1, maxX - minX), (h - pad * 2) / Math.max(1, maxY - minY)),
+    ));
     state.view.k = k;
     state.view.x = w / 2 - ((minX + maxX) / 2) * k;
     state.view.y = h / 2 - ((minY + maxY) / 2) * k;
@@ -315,7 +325,7 @@
     ctx.stroke();
 
     // 地标
-    for (const p of state.scene.pois) {
+    for (const p of state.scene.pois ?? []) {
       const [x, y] = toPx(p.xy);
       ctx.beginPath();
       ctx.arc(x, y, p.type === 'building' ? 3.4 : 2.6, 0, Math.PI * 2);
@@ -359,38 +369,157 @@
     let dragging = false;
     let last = null;
     cv.style.cursor = 'grab';
-    cv.addEventListener('mousedown', (e) => {
-      dragging = true;
-      last = [e.clientX, e.clientY];
-      cv.style.cursor = 'grabbing';
-    });
-    window.addEventListener('mouseup', () => {
+
+    /** 以 (mx,my) 为锚点缩放；k 钳制在 0.2–8（wheel 与键盘共用同一组边界）。
+     *  🔴 旧实现只有键盘路径有钳制，滚轮连续同向滚动会让 k→1e-6（地图缩成一个点）
+     *    或坐标进入 1e12 区间（线段精度丢失、整幅消失）——实测复现。 */
+    const zoomAt = (factor, mx, my) => {
+      const r = cv.getBoundingClientRect();
+      const ax = mx ?? r.width / 2;
+      const ay = my ?? r.height / 2;
+      const wx = (ax - state.view.x) / state.view.k;
+      const wy = (ay - state.view.y) / state.view.k;
+      state.view.k = Math.min(8, Math.max(0.2, state.view.k * factor));
+      state.view.x = ax - wx * state.view.k;
+      state.view.y = ay - wy * state.view.k;
+      draw();
+    };
+
+    /** 指针拖动（鼠标/触摸/触控笔统一走 pointer 事件）。
+     *  🔴 旧实现只有 mouse 事件：手机上碰一下画布就是页面滚动，
+     *    2D 拓扑图「只能看不能动」，而 3D 走 OrbitControls 是有触摸的——
+     *    评委在手机上评审时两个视图能力不对称（实测复现）。 */
+    const activePointers = new Map();
+    let pinchStart = null;
+
+    const endDrag = () => {
       dragging = false;
+      last = null;
+      activePointers.clear();
+      pinchStart = null;
       cv.style.cursor = 'grab';
+    };
+
+    cv.addEventListener('pointerdown', (e) => {
+      cv.setPointerCapture(e.pointerId);
+      activePointers.set(e.pointerId, [e.clientX, e.clientY]);
+      if (activePointers.size === 1) {
+        dragging = true;
+        last = [e.clientX, e.clientY];
+        cv.style.cursor = 'grabbing';
+      } else if (activePointers.size === 2) {
+        // 双指：记录初始中心与间距，进入捏合缩放
+        const [a, b] = [...activePointers.values()];
+        pinchStart = {
+          dist: Math.hypot(a[0] - b[0], a[1] - b[1]),
+          k: state.view.k,
+          cx: (a[0] + b[0]) / 2,
+          cy: (a[1] + b[1]) / 2,
+        };
+        dragging = false;
+      }
     });
-    window.addEventListener('mousemove', (e) => {
-      if (!dragging) return;
+
+    cv.addEventListener('pointermove', (e) => {
+      if (!activePointers.has(e.pointerId)) return;
+      activePointers.set(e.pointerId, [e.clientX, e.clientY]);
+
+      if (pinchStart && activePointers.size >= 2) {
+        const [a, b] = [...activePointers.values()];
+        const dist = Math.hypot(a[0] - b[0], a[1] - b[1]);
+        if (pinchStart.dist > 0) {
+          const r = cv.getBoundingClientRect();
+          zoomAt(
+            (pinchStart.k * dist) / pinchStart.dist / state.view.k,
+            pinchStart.cx - r.left,
+            pinchStart.cy - r.top,
+          );
+        }
+        return;
+      }
+
+      if (!dragging || !last) return;
+      // 窗口外松手/切应用时 mouseup 不触发：buttons===0 视为已松手
+      if (e.buttons === 0 && e.pointerType === 'mouse') {
+        endDrag();
+        return;
+      }
       state.view.x += e.clientX - last[0];
       state.view.y += e.clientY - last[1];
       last = [e.clientX, e.clientY];
       draw();
     });
+
+    const releasePointer = (e) => {
+      activePointers.delete(e.pointerId);
+      if (activePointers.size < 2) pinchStart = null;
+      if (activePointers.size === 0) endDrag();
+    };
+    cv.addEventListener('pointerup', releasePointer);
+    cv.addEventListener('pointercancel', releasePointer);
+    // 失焦/切后台时复位拖动态，避免「回来一动鼠标地图就跟着跑」
+    window.addEventListener('blur', endDrag);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) endDrag();
+    });
+
     cv.addEventListener(
       'wheel',
       (e) => {
+        // 横向滚轮/触控板横滑的 deltaY===0 曾被当成「缩小」，地图莫名缩小
+        if (!e.deltaY) return;
         e.preventDefault();
         const r = cv.getBoundingClientRect();
-        const mx = e.clientX - r.left;
-        const my = e.clientY - r.top;
-        const wx = (mx - state.view.x) / state.view.k;
-        const wy = (my - state.view.y) / state.view.k;
-        state.view.k *= e.deltaY < 0 ? 1.12 : 0.89;
-        state.view.x = mx - wx * state.view.k;
-        state.view.y = my - wy * state.view.k;
-        draw();
+        // 倍率随 delta 大小连续化：鼠标滚轮与触控板双指手感一致
+        const factor = e.deltaY < 0 ? Math.min(1.6, 1 + Math.abs(e.deltaY) / 400) : Math.max(0.62, 1 - Math.abs(e.deltaY) / 400);
+        zoomAt(factor, e.clientX - r.left, e.clientY - r.top);
       },
       { passive: false },
     );
+
+    /* 键盘可达：只用键盘的访客（含读屏用户）也要能探查场景。
+       方向键平移、+/- 缩放、0 复位、Escape  also 复位；只在画布获得焦点时响应，
+       避免和页面滚动抢按键（preventDefault 由我们负责）。 */
+    cv.tabIndex = 0;
+    cv.setAttribute('role', 'application');
+    cv.setAttribute(
+      'aria-label',
+      '场景路网与地标图：方向键平移，加号放大，减号缩小，数字 0 或 Escape 复位视角',
+    );
+    cv.addEventListener('keydown', (e) => {
+      const stepPx = e.shiftKey ? 80 : 32;
+      switch (e.key) {
+        case 'ArrowLeft':
+          state.view.x += stepPx;
+          break;
+        case 'ArrowRight':
+          state.view.x -= stepPx;
+          break;
+        case 'ArrowUp':
+          state.view.y += stepPx;
+          break;
+        case 'ArrowDown':
+          state.view.y -= stepPx;
+          break;
+        case '+':
+        case '=':
+          zoomAt(1.15);
+          break;
+        case '-':
+        case '_':
+          zoomAt(1 / 1.15);
+          break;
+        case '0':
+        case 'Escape':
+          fitView();
+          break;
+        default:
+          return; // 不拦截其他键（Tab / 读屏快捷键必须放行）
+      }
+      e.preventDefault();
+      draw();
+    });
+
     window.addEventListener('resize', resizeCanvas);
   }
 
@@ -439,7 +568,7 @@
         )
         .join('');
       const note = meta.sandboxPriceNote
-        ? `<tr><td colspan="3" style="padding-top:10px;font-size:11.5px;color:var(--text-faint);border:0">
+        ? `<tr><td colspan="3" class="tier-note">
              ${esc(meta.sandboxPriceNote)}</td></tr>`
         : '';
       $('#tierTable').querySelector('tbody').innerHTML = rows + note;
@@ -505,7 +634,7 @@
       .join('');
     body.innerHTML = `
       <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
-        <span style="font-size:26px;font-weight:600;color:var(--cyan);font-variant-numeric:tabular-nums">${esc(
+        <span class="ent-num">${esc(
           data.remaining,
         )}</span>
         <span style="font-size:12.5px;color:var(--text-dim)">次可用（共发放 ${esc(data.granted)}，已用 ${esc(
@@ -634,7 +763,7 @@ ${esc(t.step2_payment.buyerCommands.join('\n'))}</code></pre>
           <pre><code>bizContent:
 ${esc(JSON.stringify(t.step3_verify.bizContent, null, 2))}</code></pre>
         </div>
-        <div style="margin-top:12px;font-size:12px;color:var(--text-faint);letter-spacing:.05em;text-transform:uppercase;margin-bottom:8px">五项业务核验</div>
+        <div class="label-cap">五项业务核验</div>
         <table class="data"><tbody>${t.step3_verify.checks
           .map((c) => `<tr><td><code>${esc(c)}</code></td><td style="color:var(--text-faint)">不通过则拒绝履约</td></tr>`)
           .join('')}</tbody></table>`,
@@ -671,7 +800,7 @@ ${esc(JSON.stringify(envelope, null, 2))}</code></pre>
         </div>
         ${
           b.content_preview
-            ? `<div style="margin-top:14px;font-size:12px;color:var(--text-faint);letter-spacing:.05em;text-transform:uppercase;margin-bottom:8px">交付内容</div>
+            ? `<div class="label-cap label-cap-mt">交付内容</div>
                <div class="codeblock"><pre><code>${jsonHighlight(b.content_preview)}</code></pre></div>`
             : ''
         }`;
@@ -735,9 +864,9 @@ ${esc(JSON.stringify(envelope, null, 2))}</code></pre>
     const view = $('#traceView');
     if (!view) return;
     view.innerHTML = `
-      <div style="display:flex;align-items:center;gap:9px;margin-bottom:14px;flex-wrap:wrap">
+      <div class="trace-step-head">
         <span class="tag blue">步骤 ${index + 1} / ${STEP_DEFS.length}</span>
-        <strong style="font-size:14px">${esc(def.title)}</strong>
+        <strong class="trace-step-title">${esc(def.title)}</strong>
       </div>
       ${def.render(trace)}`;
   }
@@ -1097,8 +1226,10 @@ ${JSON.stringify(
     );
     const hint = $('#viewHint');
     if (hint) {
-      hint.textContent =
-        mode === '3d' ? '左键旋转 · 右键平移 · 滚轮缩放' : '拖动可平移 · 滚轮缩放';
+      hint.innerHTML =
+        mode === '3d'
+          ? '左键旋转 · 右键平移 · 滚轮缩放 · <b>键盘：</b>方向键 / +− / 0'
+          : '拖动可平移 · 滚轮缩放 · <b>键盘：</b>方向键 / +− / 0';
     }
     if (mode === '3d') {
       cv2d.hidden = true;
@@ -1111,7 +1242,12 @@ ${JSON.stringify(
       cv2d.hidden = false;
       const note = $('#scaleNote');
       if (note) note.hidden = true;
+      // 🔴 切回 2D 必须重新 fitView：hidden 期间可能发生过 resize（浏览器缩放、
+      //    iOS 地址栏收起、开合 DevTools），只用缓存尺寸 resize 不够——
+      //    纵深防御，保证切回来永远是正确构图（实测复现过坏视图留着）。
       resizeCanvas();
+      fitView();
+      draw();
     }
   }
 
@@ -1128,10 +1264,22 @@ ${JSON.stringify(
     guide: '输入起点与终点，返回拓扑计算过的导览答案。',
     quest: '一键生成一次场景任务：线索链 + 打卡点 + 评分 + 可核验完成凭证（无需输入问题）。',
   };
+  // 分段控件滑块：用真实按钮几何定位，resize / 字体变化后重新测量
+  function moveSegThumb() {
+    const seg = $('#modeSeg');
+    const thumb = seg?.querySelector('.seg-thumb');
+    const active = seg?.querySelector('button.active');
+    if (!seg || !thumb || !active) return;
+    thumb.style.width = `${active.offsetWidth}px`;
+    thumb.style.transform = `translateX(${active.offsetLeft}px)`;
+    seg.dataset.mode = active.dataset.mode;
+  }
+  window.addEventListener('resize', moveSegThumb);
   $$('#modeSeg button').forEach((btn) => {
     btn.addEventListener('click', () => {
       state.demoMode = btn.dataset.mode;
       $$('#modeSeg button').forEach((b) => b.classList.toggle('active', b === btn));
+      moveSegThumb();
       const level = $('#levelSel');
       if (level) level.hidden = state.demoMode !== 'quest';
       const tierSel = $('#tierSel');
@@ -1397,8 +1545,8 @@ ${JSON.stringify(
       : '';
 
     const billing = content.billing
-      ? `<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
-          <div style="font-size:11px;color:var(--text-faint);letter-spacing:.05em;text-transform:uppercase;margin-bottom:9px">用量计量（不参与扣费，仅用于核验）</div>
+      ? `<div class="billing-block">
+          <div class="label-cap">用量计量（不参与扣费，仅用于核验）</div>
           <div class="metrics" style="gap:18px">
             ${Object.entries(content.billing)
               .map(
@@ -1485,8 +1633,8 @@ ${JSON.stringify(
     }
 
     const billing = content.billing
-      ? `<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
-          <div style="font-size:11px;color:var(--text-faint);letter-spacing:.05em;text-transform:uppercase;margin-bottom:9px">用量计量（不参与扣费，仅用于核验）</div>
+      ? `<div class="billing-block">
+          <div class="label-cap">用量计量（不参与扣费，仅用于核验）</div>
           <div class="metrics" style="gap:18px">
             ${Object.entries(content.billing)
               .map(([k, v]) => `<div class="metric"><div class="k">${esc(k)}</div><div class="v" style="font-size:15px">${esc(v)}</div></div>`)
@@ -1866,6 +2014,44 @@ ${JSON.stringify(
     }
   });
 
+  /* ────────────── 机构采购留资 ──────────────
+     B 端入口：研学机构/学校批量采购十次包。联系方式是有意收集的
+     对接信息（与反馈墙「见联系方式就降级」的口径不同），
+     边界由界面明示 + 服务端只写不读保证。 */
+  $('#leadForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const submit = $('#leadSubmit');
+    const note = $('#leadForm')?.querySelector('.fb-note');
+    const org = $('#leadOrg').value.trim();
+    const contact = $('#leadContact').value.trim();
+    const scale = $('#leadScale').value.trim();
+    const extra = $('#leadNote').value.trim();
+    if (!org || !contact) {
+      if (note) note.textContent = '机构名称与联系方式都要填。';
+      return;
+    }
+    submit.disabled = true;
+    if (note) note.textContent = '提交中…';
+    try {
+      const res = await fetch('api/v1/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ org, contact, scale, note: extra }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (note) note.textContent = j.error ?? '提交失败，请稍后再试。';
+        return;
+      }
+      $('#leadForm').reset();
+      if (note) note.textContent = j.message ?? '已收到，我们会主动联系你。';
+    } catch (err) {
+      if (note) note.textContent = `提交失败：${err.message}`;
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
   /* ────────────── 启动 ────────────── */
 
   async function boot() {
@@ -2027,6 +2213,20 @@ ${JSON.stringify(
     }
     if (!detail) {
       if (skeleton) skeleton.hidden = true;
+      // 🔴 加载失败必须清干净：旧实现只隐藏骨架就返回——state.scene 还是旧场景，
+      //    而 sceneId/标签已是新场景，此时问一句新场景的路线，会把新 polyline
+      //    画在**旧地图**上（实测复现，直接伤害「数字来自后端实时状态」的可信度）。
+      state.scene = null;
+      state.lastRoute = null;
+      state.lastRouteMeta = null;
+      if (cv) {
+        ctx.clearRect(0, 0, cv.width, cv.height);
+      }
+      if (state.scene3d) {
+        try { state.scene3d.dispose(); } catch {}
+        state.scene3d = null;
+      }
+      setError('场景数据加载失败', '请重试，或切换到其它场景。');
       return;
     }
     state.scene = detail;
@@ -2088,8 +2288,26 @@ ${JSON.stringify(
       if (!e.target.closest('#navBurger') && !e.target.closest('#navSheet')) closeSheet();
     });
     window.addEventListener('resize', () => {
-      if (window.innerWidth > 980) closeSheet();
+      // 与 CSS 导航断点保持一致（links 797px + brand 177 + CTA 84 + 间距 ≈ 1140px）
+      if (window.innerWidth > 1199) closeSheet();
     });
+  }
+
+  /* ── 回到顶部 ── 长页面（1.7 万像素高）滚动 800px 后浮现 */
+  const backTop = $('#backTop');
+  if (backTop) {
+    backTop.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+    let btTicking = false;
+    const updateBackTop = () => {
+      backTop.hidden = window.scrollY < 800;
+      btTicking = false;
+    };
+    window.addEventListener('scroll', () => {
+      if (btTicking) return;
+      btTicking = true;
+      requestAnimationFrame(updateBackTop);
+    }, { passive: true });
+    updateBackTop();
   }
 
   // 桌面应用安装引导：按运行环境给诚实的那一条路

@@ -40,14 +40,20 @@ export function createScene3D(canvas, data, opts = {}) {
     alpha: false,
     powerPreference: 'high-performance',
   });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   // ACES 会把深蓝场景的中间调压得很死，这里改用线性映射 + 提高曝光，
   // 让建筑体块的蓝色与描边都读得出来
   renderer.toneMapping = THREE.LinearToneMapping;
   renderer.toneMappingExposure = 1.35;
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  // 🔴 阴影一次性更新：投影物体（建筑 + 地面）全是静态的，路线/信标/pulse 都是
+  //    MeshBasicMaterial 且 castShadow=false。默认 autoUpdate=true 会让**每一帧**
+  //    （哪怕只是 pulse 动画或一次 controls change）都重跑一遍 2048² 全场景深度
+  //    pass——在评委集显上是单项最贵的无用功（实测：静态场景零收益）。
+  renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.needsUpdate = true;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(COLORS.fog);
@@ -68,9 +74,20 @@ export function createScene3D(canvas, data, opts = {}) {
   controls.minPolarAngle = 0.08;
 
   // ── 场景范围 ─────────────────────────────────────────────
+  // 🔴 空 nodes 兜底（2026-11-21 实测）：内置 demo-park 的节点没有 w_ 前缀，
+  //    API 转出的 graph.nodes 是空数组 → Math.min(...[]) = Infinity → cx/cy=NaN、
+  //    focus/focusSpan/雾密度/相机全 NaN —— 选中该场景后 3D 视图**整屏黑屏**，
+  //    不抛错、无任何提示。兜底：nodes 为空时用 pois 的 xy，再空用 footprints
+  //    展平点，都空则给一个合理的默认范围。
   const nodes = data.graph?.nodes ?? [];
-  const xs = nodes.map((n) => n[0]);
-  const ys = nodes.map((n) => n[1]);
+  let rangePts = nodes.map((n) => [n[0], n[1]]);
+  if (!rangePts.length) rangePts = (data.pois ?? []).map((p) => p.xy);
+  if (!rangePts.length) {
+    rangePts = (data.footprints ?? []).flatMap((f) => f.ring ?? []);
+  }
+  if (!rangePts.length) rangePts = [[-100, -100], [100, 100]];
+  const xs = rangePts.map((p) => p[0]);
+  const ys = rangePts.map((p) => p[1]);
   const minX = Math.min(...xs);
   const maxX = Math.max(...xs);
   const minY = Math.min(...ys);
@@ -79,6 +96,7 @@ export function createScene3D(canvas, data, opts = {}) {
   const cy = (minY + maxY) / 2;
   const spanX = Math.max(1, maxX - minX);
   const spanY = Math.max(1, maxY - minY);
+  // 坐标约定：x→东，北→-z（与 builder 的 toLocal：lon→x、lat→y 严格一致）
   const toWorld = (x, y, h = 0) => new THREE.Vector3(x - cx, h, -(y - cy));
 
   // ── 取景中心（命名地标密集区，优于整个校园包围盒）────────────
@@ -141,12 +159,16 @@ export function createScene3D(canvas, data, opts = {}) {
     if (/[路街道巷弄]$/.test(f.name ?? '')) continue;
 
     const shape = new THREE.Shape();
-    const pts = f.ring.map(([x, y]) => new THREE.Vector2(x - cx, -(y - cy)));
+    // 🔴 2026-11-21 实测修复（用 vendor three r187 验证过坐标变换）：
+    //    这里曾经写 `-(y - cy)`。shape 的 y 取负后，下面的 `geo.rotateX(-90°)`
+    //    又把 shape-y 映射到世界 -z——**双重取负互相抵消**，最终「北 → +z」，
+    //    与 toWorld 的「北 → -z」相反：建筑体块在南北轴上与路网/信标/路线**镜像**，
+    //    楼压在错误位置的道路上（下沙 span 1550m，边缘建筑错位可达上千米）。
+    //    去掉取负后两者一致（shape-y → 世界 -z，即北）。
+    const pts = f.ring.map(([x, y]) => new THREE.Vector2(x - cx, y - cy));
 
-    // three.js 的 Shape 要求**逆时针**缠绕。
-    // OSM 的建筑环在经纬度里通常是顺时针的，再叠一次 y 取反后方向会反过来，
-    // 拉伸出来的体块法线朝内 → 被背面剔除 → 只剩描边线、看不到实体。
-    // 这里统一成逆时针。
+    // three.js 的 ExtrudeGeometry 内部已用 ShapeUtils.isClockWise 归一化缠绕，
+    // 且材质是 DoubleSide——这里的 reverse 只是双保险，不影响正确性。
     let area = 0;
     for (let i = 0; i < pts.length; i += 1) {
       const j = (i + 1) % pts.length;
@@ -322,6 +344,7 @@ export function createScene3D(canvas, data, opts = {}) {
       new THREE.Vector3(mid.x, 6, mid.z).add(dir.multiplyScalar(radius * 1.55)),
     );
     controls.update();
+    invalidate();
   }
 
   /** 高亮一组地标（查询命中的起点/终点） */
@@ -332,6 +355,7 @@ export function createScene3D(canvas, data, opts = {}) {
       b.head.scale.setScalar(on ? 1.7 : 1);
       b.pole.material.opacity = on ? 0.95 : 0.5;
     }
+    invalidate();
   }
 
   // ── 灯光 ─────────────────────────────────────────────────
@@ -362,22 +386,41 @@ export function createScene3D(canvas, data, opts = {}) {
   controls.target.copy(focus);
   controls.update();
 
-  // ── 渲染循环（不可见时暂停）─────────────────────────────
+  // ── 渲染循环（按需渲染 + 不可见时暂停）──────────────────
+  //
+  // 为什么从「常驻 rAF」改成按需：场景静止时（没有路线、用户没操作）
+  // 没有任何可见变化，常驻渲染是纯粹的开销——在弱机器上会把主线程占满，
+  // 拖慢同页的交互（实测：软件渲染下 3D 长任务能让页面 fetch 的响应
+  // 迟到几十秒）。改成：
+  //   ① 无路线且无交互 → 一帧都不渲染（rAF 空转，≈0% CPU）；
+  //   ② 有路线 → 保持脉冲光点动画（这是要给人看的「money shot」）；
+  //   ③ 任何状态变化（轨道控制/路线/高亮/缩放/复位）→ 立刻补一帧。
   let raf = 0;
   let visible = true;
   let t = 0;
+  let needsRender = true;
+
+  const invalidate = () => { needsRender = true; };
+  controls.addEventListener('change', invalidate);
 
   function frame() {
     raf = requestAnimationFrame(frame);
-    if (!visible) return;
-    t += 0.006;
-    for (const p of pulses) {
-      const u = (t * 0.16 + p.offset) % 1;
-      p.mesh.position.copy(p.curve.getPointAt(u));
-      p.mesh.material.opacity = 0.85 * Math.sin(u * Math.PI);
+    if (!visible || document.hidden) return;
+    // 有路线才需要连续动画（脉冲沿路线流动）
+    const animating = pulses.length > 0;
+    if (animating) {
+      t += 0.006;
+      for (const p of pulses) {
+        const u = (t * 0.16 + p.offset) % 1;
+        p.mesh.position.copy(p.curve.getPointAt(u));
+        p.mesh.material.opacity = 0.85 * Math.sin(u * Math.PI);
+      }
     }
     controls.update();
-    renderer.render(scene, camera);
+    if (animating || needsRender) {
+      renderer.render(scene, camera);
+      needsRender = false;
+    }
   }
 
   const io = new IntersectionObserver(
@@ -385,6 +428,11 @@ export function createScene3D(canvas, data, opts = {}) {
     { threshold: 0.02 },
   );
   io.observe(canvas);
+  // 标签页切到后台时暂停渲染（省电，也避免回来时一大坨积压帧）
+  // 🔴 命名函数 + dispose 里移除：匿名监听每切一次场景就泄漏一个，
+  //    且闭包钉住整个旧场景（scene/camera/renderer/全部 geometry）。
+  const onVisibility = () => { if (!document.hidden) invalidate(); };
+  document.addEventListener('visibilitychange', onVisibility);
 
   function resize() {
     const r = canvas.getBoundingClientRect();
@@ -393,6 +441,7 @@ export function createScene3D(canvas, data, opts = {}) {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    invalidate();
   }
   resize();
   window.addEventListener('resize', resize);
@@ -415,8 +464,23 @@ export function createScene3D(canvas, data, opts = {}) {
       cancelAnimationFrame(raf);
       io.disconnect();
       window.removeEventListener('resize', resize);
+      document.removeEventListener('visibilitychange', onVisibility);
       controls.dispose();
+      // 🔴 显式遍历释放 CPU 侧资源：r187 的 renderer.dispose() 会连带销毁**已上传**的
+      //    GL buffer，但没渲染过（被视锥剔除）的几何不在注册表里；且这是版本相关行为。
+      //    显式 traverse 跨版本安全。切勿 forceContextLoss——canvas 会被下一个
+      //    renderer 复用，强制丢上下文会弄坏重建。
+      scene.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) {
+          const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+          for (const m of mats) m.dispose();
+        }
+      });
       renderer.dispose();
+      // 🔴 调试句柄必须清掉：否则 dispose 后它仍强引用旧场景，
+      //    切到 2D 或离开页面时这份数据永远无法 GC。
+      if (window.__scene3d) delete window.__scene3d;
     },
   };
 }

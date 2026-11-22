@@ -1,3 +1,7 @@
+# 🟥 已退役，勿用（2026-11-21 标注）🟥
+# 现网跑 Docker Compose（deploy/kit-sg60/compose.yml），不用 systemd 裸机路径。
+# 保留本文件仅作历史记录；如确需裸机部署，注意把 PORT 与 nginx 反代端口对齐
+# （本文件与退役的 nginx.conf 在端口上互相矛盾：这里是 3000，那里写 3100）。
 [Unit]
 Description=SceneGuide - 三维问路（PAYATHON 2026 参赛作品）
 After=network.target

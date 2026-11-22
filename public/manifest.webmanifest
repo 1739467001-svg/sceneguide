@@ -41,6 +41,12 @@
       "url": "./#demo"
     },
     {
+      "name": "我的账户",
+      "short_name": "账户",
+      "description": "查看我的订单、权益额度、礼品码与退款",
+      "url": "./account.html"
+    },
+    {
       "name": "支付链路报文",
       "short_name": "报文",
       "description": "查看真实抓取的 402 协议往返报文",

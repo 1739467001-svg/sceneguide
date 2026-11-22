@@ -43,6 +43,36 @@ curl -v "http://121.43.80.231/sceneguide/api/v1/guide?scene=<场景ID>&query=<�
 > 买家付清后，同一访客的后续调用**自动从余额扣减、直接返回资源，不再产生新的支付挑战**；
 > 可随时 `GET /api/v1/entitlements` 查询余额。
 
+### 买家侧自助端点（权益 / 转赠 / 售后）
+
+| 端点 | 方法 | 用途 |
+|---|---|---|
+| `/api/v1/entitlements` | GET | 查询当前访客的额度余额与到期时间 |
+| `/api/v1/gifts` | POST | 用 1 次已购额度生成礼品码（转赠给他人） |
+| `/api/v1/gifts/redeem` | POST | 兑换礼品码（`{code}`），额度即时到账 |
+| `/api/v1/gifts/revoke` | POST | 撤销**尚未被兑换**的礼品码，额度退回 |
+| `/api/v1/me` | GET | 买家账户摘要：我的订单 / 余额 / 我生成与收到的礼品码 |
+| `/api/v1/refunds` | POST | 申请退款（`{out_trade_no, reason}`）：权益即时回收 + 工单留痕 + 订单标注 |
+| `/api/v1/verify/:out_trade_no` | GET | 订单核验卡（公开可分享：脱敏交易号 + 证据哈希） |
+| `account.html` | 页面 | 人类买家的「我的账户」：上述全部能力的可视化操作台 |
+
+> 转赠与退款都按访客隔离，只作用于自己的额度与订单。沙箱环境下资金为 mock，
+> 「退款」退的是权益与记录；资金原路退回需生产环境 `service_id`。
+
+### Agent 侧：MCP 发现入口（无需预先知道域名）
+
+```
+POST /mcp   （JSON-RPC 2.0 over HTTP）
+  {"jsonrpc":"2.0","id":1,"method":"tools/list"}
+  {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"scene_guide","arguments":{...}}}
+```
+
+- `tools/list` 返回 `scene_guide`（`annotations.paid=true`）与 `scene_guide_scenes`；
+- 未带凭证调用 `scene_guide` → 返回 `payment_required` 与**带商家签名的
+  `Payment-Needed` 账单头**（`structuredContent.payment_needed_header`，Base64URL 原文，
+  订单已同步落库）——把它原样交给 `alipay-pay-for-402-service` 即可完成支付；
+- 携 `payment_proof` 再次调用 → 验付并交付结构化结果；同一凭证重放不会重复履约。
+
 ### 第二步：处理 402 响应
 
 你将收到一个**状态码为 402 的响应报文，其中包含 `Payment-Needed` 响应头**。
@@ -95,4 +125,6 @@ curl -v "http://121.43.80.231/sceneguide/api/v1/guide?scene=<场景ID>&query=<�
 - **请求返回非 402 状态码**：如返回 200，直接展示内容；如 4xx/5xx 错误，告知用户服务暂时不可用，建议稍后重试。
 - **返回 `ORDER_NOT_FOUND`**：付费凭证有效但商户侧订单已过期或服务端状态不一致，请重新发起一次请求以获取新的支付挑战。
 - **返回 `RESOURCE_ID_MISMATCH`**：资源标识不匹配，通常意味着复用了其他资源域名的支付凭证，请重新发起请求。
+- **返回 `FULFILLMENT_CONFIRM_FAILED`（502）**：资源已生成但履约回执未确认——
+  **请用同一笔 `Payment-Proof` 原样重试**（这是协议设计的重试路径，不会重复扣费或重复交付）。
 - 其余异常情况将由 `alipay-pay-for-402-service` 技能处理。

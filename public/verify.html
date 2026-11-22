@@ -28,17 +28,44 @@
     .amount { color:var(--cyan); font-weight:700; font-size:15px; }
     .explain { background:rgba(34,211,166,.07); border:1px solid rgba(34,211,166,.2); border-radius:10px; padding:12px 14px; font-size:12.5px; color:var(--dim); line-height:1.7; margin-bottom:20px; }
     .explain b { color:var(--cyan); }
-    .cta { display:block; text-align:center; background:linear-gradient(135deg,var(--blue),#1f5fd8); color:#fff; text-decoration:none; font-weight:600; font-size:14.5px; padding:13px; border-radius:11px; }
-    .cta:hover { filter:brightness(1.08); }
-    .foot { margin-top:16px; text-align:center; font-size:11.5px; color:var(--faint); }
-    .err { text-align:center; padding:30px 0 10px; color:var(--dim); font-size:14px; line-height:1.8; }
-    .num { font-variant-numeric:tabular-nums; }
+  .cta { display:block; text-align:center; background:linear-gradient(135deg,var(--blue),#1f5fd8); color:#fff; text-decoration:none; font-weight:600; font-size:14.5px; padding:13px; border-radius:11px; }
+  .cta:hover { filter:brightness(1.08); }
+  .cta-row { display:flex; gap:10px; margin-top:4px; }
+  .cta-row .cta { flex:1; }
+  .cta-ghost { display:block; text-align:center; background:var(--card); border:1px solid var(--border); color:var(--dim); text-decoration:none; font-weight:600; font-size:13px; padding:12px; border-radius:11px; cursor:pointer; font-family:inherit; }
+  .cta-ghost:hover { color:var(--text); border-color:rgba(255,255,255,.24); }
+  .foot { margin-top:16px; text-align:center; font-size:11.5px; color:var(--faint); }
+  .err { text-align:center; padding:30px 0 10px; color:var(--dim); font-size:14px; line-height:1.8; }
+  .num { font-variant-numeric:tabular-nums; }
+
+  /* ── 收据打印态：白纸黑字 + 双线框，其余一律隐藏 ── */
+  #receiptCard { display:none; }
+  body.printing-receipt { background:#fff; padding:0; }
+  body.printing-receipt .card { background:#fff; border:0; box-shadow:none; max-width:none; padding:0; }
+  body.printing-receipt .card > *:not(#receiptCard) { display:none !important; }
+  body.printing-receipt #receiptCard { display:block; color:#111; }
+  body.printing-receipt #receiptCard * { color:#111; }
+  .rcp { border:2.5px double #0e7a63; border-radius:4px; padding:16mm 14mm; }
+  .rcp-head { display:flex; align-items:baseline; justify-content:space-between; border-bottom:1.5px solid #0e7a63; padding-bottom:8px; margin-bottom:14px; }
+  .rcp-title { font-size:20px; font-weight:800; letter-spacing:.02em; }
+  .rcp-no { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px; color:#555; }
+  .rcp-row { display:flex; gap:14px; padding:7px 0; border-bottom:1px dotted #bbb; font-size:13.5px; }
+  .rcp-row .k { color:#555; min-width:6.5em; }
+  .rcp-row .v { flex:1; word-break:break-all; }
+  .rcp-hash { color:#0e7a63; font-weight:600; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; }
+  .rcp-foot { margin-top:16px; font-size:11px; color:#666; line-height:1.8; }
+  @media print {
+    body { background:#fff; padding:0; }
+    .card { box-shadow:none; border:0; }
+  }
   </style>
 </head>
 <body>
   <div class="card">
     <div class="brand"><span class="mark">三</span>三维问路 · SceneGuide</div>
     <div id="body"><div class="err">正在核验…</div></div>
+    <!-- 收据打印态：由 JS 填充后整页只留这一张（见 @media print / body.printing-receipt） -->
+    <div id="receiptCard" aria-hidden="true"></div>
   </div>
   <script>
     // 核验卡：?t=<out_trade_no>
@@ -86,9 +113,54 @@
               完整路线内容仍属付费交付——核验的是「这笔交易真实发生」，不是内容本身。
             </div>
             <a class="cta" href="./?ref=share">${esc(j.cta?.message ?? '我也要问')}</a>
+            <div class="cta-row">
+              <button type="button" class="cta-ghost" id="receiptBtn">打印收据（可报销留档）</button>
+            </div>
             <div class="foot">三维问路 SceneGuide · PAYATHON 2026 · OpenStreetMap © OSM contributors (ODbL)</div>`);
+          bindReceiptButton(j);
         })
         .catch(() => $('<div class="err">核验服务暂时不可用，请稍后再试。</div>'));
+    }
+
+    /** 打印收据：同一份核验数据排成正式收据版式，打印时整页只留它 */
+    function bindReceiptButton(j) {
+      const btn = document.getElementById('receiptBtn');
+      if (!btn) return;
+      btn.addEventListener('click', () => {
+        const s = j.summary ?? {};
+        const detail = s.kind === 'quest'
+          ? [['交付物', `场景任务 · ${esc(s.title ?? '')}`], ['打卡站点', `${esc(s.checkpoints)} 站`], ['总里程', `${esc(s.total_distance_m)} m`]]
+          : [['路线', `${esc(s.from)} → ${esc(s.to)}`], ['距离', `${esc(s.distance_m)} m（${esc(s.path_type) === 'walkway' ? '实测步道' : '直距估算'}）`]];
+        const usage = Object.entries(j.usage ?? {}).map(([k, v]) => `${k} ${v}`).join(' · ') || '—';
+        document.getElementById('receiptCard').innerHTML = `
+        <div class="rcp">
+          <div class="rcp-head">
+            <span class="rcp-title">交易收据</span>
+            <span class="rcp-no">三维问路 SceneGuide · PAYATHON 2026</span>
+          </div>
+          <div class="rcp-row"><span class="k">商品</span><span class="v">${esc(j.goods_name ?? '')}</span></div>
+          ${detail.map(([k, v]) => `<div class="rcp-row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join('')}
+          <div class="rcp-row"><span class="k">实付金额</span><span class="v"><b>¥${esc(j.amount)} ${esc(j.currency)}</b></span></div>
+          <div class="rcp-row"><span class="k">交易号</span><span class="v">${esc(j.trade_no_masked)}（尾号，已脱敏）</span></div>
+          <div class="rcp-row"><span class="k">商户订单号</span><span class="v">${esc(id)}</span></div>
+          <div class="rcp-row"><span class="k">履约时间</span><span class="v">${esc(String(j.fulfilled_at ?? '').slice(0, 19).replace('T', ' '))} UTC</span></div>
+          <div class="rcp-row"><span class="k">用量计量</span><span class="v">${esc(usage)}</span></div>
+          <div class="rcp-row"><span class="k">证据哈希</span><span class="v rcp-hash">${esc(j.evidence?.geometryHash ?? '—')}</span></div>
+          <div class="rcp-foot">
+            本收据由商家服务端基于真实履约记录出具：证据哈希覆盖真实路网拓扑的节点与边，任何人可复算；
+            交易号已脱敏，不含任何个人信息。完整路线内容仍属付费交付——核验的是「这笔交易真实发生」，不是内容本身。<br/>
+            支付通道：支付宝 AI 付 A2M 智能收（HTTP 402 按量付费）｜ 场景数据 © OpenStreetMap contributors (ODbL)
+          </div>
+        </div>`;
+        document.body.classList.add('printing-receipt');
+        const cleanup = () => {
+          document.body.classList.remove('printing-receipt');
+          window.removeEventListener('afterprint', cleanup);
+        };
+        window.addEventListener('afterprint', cleanup);
+        window.print();
+        setTimeout(cleanup, 1500);
+      });
     }
   </script>
 </body>
