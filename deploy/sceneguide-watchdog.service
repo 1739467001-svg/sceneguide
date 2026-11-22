@@ -1,0 +1,10 @@
+[Unit]
+Description=SceneGuide 自愈看门狗（探活失败自动重启容器）
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/sg-watchdog.sh
+# 超时保护：restart + 探活最长 ~90s
+TimeoutStartSec=180

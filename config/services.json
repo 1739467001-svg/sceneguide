@@ -18,6 +18,12 @@
       "unitPrice": "9.90",
       "quota": 1,
       "label": "场景任务（研学）"
+    },
+    "trial": {
+      "serviceId": "api_mock_service_id",
+      "unitPrice": "4.95",
+      "quota": 1,
+      "label": "单次导览（首发半价）"
     }
   }
 }
