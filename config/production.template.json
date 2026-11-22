@@ -10,6 +10,6 @@
   "appId": "FILL_ME",
   "alipayPublicKey": "FILL_ME",
   "privateKey": "FILL_ME",
-  "sellerId": "2088032169158784",
+    "sellerId": "FILL_ME_2088格式商户PID（= 报名支付宝账号的 PID，勿用他人账号）",
   "gateway": "https://openapi.alipay.com/gateway.do"
 }
