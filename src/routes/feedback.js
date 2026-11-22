@@ -135,13 +135,16 @@ export function createFeedbackRouter({ analytics }) {
     return res.json(result);
   });
 
-  /** 举报：累计 3 次自动隐藏 */
+  /** 举报：累计 3 次**不同访客**自动隐藏（一人一票，防单人刷下架） */
   router.post('/api/v1/feedback/:id/report', (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({ code: 'INVALID_ID', message: '反馈编号无效' });
     }
-    const result = analytics.reportFeedback(id);
+    if (!req.visitorId) {
+      return res.status(400).json({ code: 'NO_VISITOR', message: '无法识别访客身份，请刷新页面重试' });
+    }
+    const result = analytics.reportFeedback(id, req.visitorId);
     if (!result) {
       return res.status(404).json({ code: 'FEEDBACK_NOT_FOUND', message: '反馈不存在' });
     }

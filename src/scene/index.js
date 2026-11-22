@@ -179,9 +179,18 @@ export function planRoute(scene, fromId, toId) {
     cursor = step.from;
   }
 
-  const points = chain.map((s) => scene.nodes.find((n) => n.id === s.to));
+  // 🔴 起点必须进 points：chain 只记录「跳到的节点」，不含起点本身。
+  //    缺起点会连带四个可见缺陷（2026-11-21 实测复现）：
+  //    ① 3D/2D 折线不从起点出发，第一段路不画；
+  //    ② 前端把 polyline[0] 当起点标记，圆点画到第一个中间节点上；
+  //    ③ 「途经」文案漏掉第一个中间地标；
+  //    ④ 证据哈希不覆盖起点节点。
+  const startNode = scene.nodes.find((n) => n.id === fromId);
+  const points = [
+    ...(startNode ? [startNode] : []),
+    ...chain.map((s) => scene.nodes.find((n) => n.id === s.to)),
+  ];
   const distanceM = dist.get(toId);
-
   return {
     found: true,
     points,
@@ -280,15 +289,26 @@ export function answerGuide({ sceneId, query, originHint }) {
   if (intent === 'overview' || entities.length === 0) {
     const named = namedNodes(scene);
     const listed = named.slice(0, 10).map((n) => n.name);
+    // 🔴 没有匹配到任何地标时，必须先说「没找到」，再给目录。
+    //    旧行为直接甩一份 134 个地标的目录（还混着商店酒店），
+    //    用户问「怎么去体育馆」得到的是一份购物清单——既没回答问题也没说没找到（实测复现）。
+    //    只有确实是「随便看看」的问法（有什么/哪些/目录）才直接给目录。
+    const browsing = /有什|哪|些|目录|介绍|列表|分布|多大|多少/.test(query);
+    const miss = entities.length === 0 && !browsing && query.trim()
+      ? `没有在${scene.name}里找到与「${query.trim().slice(0, 20)}」匹配的地标。`
+      : '';
     const text =
+      miss +
       `${scene.name}收录了 ${named.length} 个可导航地标` +
       `${listed.length ? `，例如${listed.join('、')}等` : ''}。告诉我起点和终点，我来规划路线。`;
     return { ok: true, ...base, answer: text, route: null, pois: [] };
   }
 
   if (intent === 'poi') {
-    // 同名/同类地标可能有多个（多个食堂、多栋公寓），全部列出比只报一个有用
-    const hits = dedupeByName(entities).slice(0, 6);
+    // 同名/同类地标可能有多个（多个食堂、多栋公寓），全部列出比只报一个有用。
+    // 🔴 曾经按 name 去重——三个食堂被折成一个，与注释意图相反（实测复现）；
+    //    改为按 node.id 去重，同名节点靠方位区分后全部列出。
+    const hits = [...new Map(entities.map((e) => [e.node.id, e])).values()].slice(0, 6);
     const hit = hits[0];
 
     if (hits.length > 1) {
@@ -319,13 +339,54 @@ export function answerGuide({ sceneId, query, originHint }) {
 
   // route / route_to_origin：先按句式解析起终点，解析不了再退回「候选顺序」
   const endpoints = parseEndpoints(scene, query);
-  const toEntity = endpoints?.to ?? entities[0];
-  // 起点优先级：句式解析 > origin 参数 > 问题文本里的第二个实体
-  const fromEntity = endpoints?.from ?? originEntity ?? entities[1] ?? null;
+  let toEntity = endpoints?.to ?? entities[0];
+  // 起点优先级：句式解析 > origin 参数 > 问题文本里的第二个实体。
+  // （originEntity 已在上面按 originHint 解析好）
+  let fromEntity = endpoints?.from ?? originEntity ?? null;
+
+  // 🔴 退回「第二个实体」之前，必须先判断用户是不是**只提了一类地方**。
+  //    OSM 里同一类地标常有几十个节点（37 栋学生公寓、3 个食堂），
+  //    此时 entities[1] 只是同类地标的另一份拷贝，拿它当起点会生成
+  //    「从41号学生公寓到38号学生公寓，84 米」这种荒谬路线（实测复现）。
+  //    判定：所有匹配名共享一个 ≥2 字且出现在问题里的公共词（如「学生公寓」）。
+  if (!fromEntity) {
+    const shared = sharedTerm(entities.map((e) => e.node.name), query);
+    const singleConcept = Boolean(shared) && entities.length > 1;
+    if (!singleConcept) {
+      // 🔴 没有「从…到…」句式时，方向必须按地标在问题里的**出现顺序**定：
+      //    用户先说「图书馆」就该以它为起点。旧实现按匹配得分排序，
+      //    并列时退化成节点表顺序，会把方向倒过来（实测：「图书馆 教学楼 怎么走」
+      //    → 「从教学楼到图书馆」）。
+      const ordered = [...entities].sort(
+        (a, b) => query.indexOf(a.matched) - query.indexOf(b.matched),
+      );
+      const from = ordered[0];
+      const to = ordered[ordered.length - 1];
+      if (from && to && from.node.id !== to.node.id) {
+        fromEntity = from;
+        toEntity = to;
+      } else {
+        fromEntity = entities.find((e) => e.node.id !== toEntity.node.id) ?? null;
+      }
+    }
+  }
 
   if (!fromEntity) {
-    const text = `已定位到${toEntity.node.name}。告诉我你的起点（或在参数里带上 origin），我就能规划路线。`;
-    return { ok: true, ...base, answer: text, route: null, pois: [poiOf(toEntity.node)] };
+    // 只提到一个地标（或提到的多个是同一类地方）：说清情况，回问起点，
+    // 而不是编一条「A 到 A」或同类互穿的路线。
+    const shared = sharedTerm(entities.map((e) => e.node.name), query);
+    const sameKind = Boolean(shared) && entities.length > 1;
+    const what = sameKind
+      ? `场景内有 ${entities.length} 个「${shared}」`
+      : `已定位到${toEntity.node.name}`;
+    const text = `${what}。告诉我你要去哪一个、从哪里出发（或在参数里带上 origin），我就能规划路线。`;
+    return {
+      ok: true,
+      ...base,
+      answer: text,
+      route: null,
+      pois: entities.slice(0, 6).map((e) => poiOf(e.node)),
+    };
   }
 
   /**
@@ -359,15 +420,17 @@ export function answerGuide({ sceneId, query, originHint }) {
   const toFinal = resolved.to;
 
   // 🔴 同点守卫：起终点解析到同一个节点时，不输出「0 米路线」这种自欺欺人的答案。
-  //    走到这里的典型场景是：用户问的目的地在场景里没有收录（如商业区的 OSM 命名不同）。
-  //    诚实做法是说明没找到，并列出场景里实际可导航的地标。
+  //    两种情况的话术必须分开（旧文案在 originHint 与目的地相同时，
+  //    一边说「没找到图书馆」一边列出「图书馆」，自相矛盾——实测复现）。
   if (fromFinal.node.id === toFinal.node.id) {
+    const byHint = originEntity && originEntity.node.id === toFinal.node.id;
     const named = namedNodes(scene);
     const listed = named.slice(0, 10).map((n) => n.name);
-    const text =
-      `没有在${scene.name}里找到「${toFinal.matched}」这个目的地` +
-      `（当前收录 ${named.length} 个可导航地标${listed.length ? `，例如${listed.join('、')}` : ''}）。` +
-      `换一个目的地，或告诉我起点，我来重新规划。`;
+    const text = byHint
+      ? `你给的起点和目的地都是「${toFinal.node.name}」——你已在该地点。换一个目的地，或告诉我真正的起点。`
+      : `没有在${scene.name}里找到「${toFinal.matched}」这个目的地` +
+        `（当前收录 ${named.length} 个可导航地标${listed.length ? `，例如${listed.join('、')}` : ''}）。` +
+        `换一个目的地，或告诉我起点，我来重新规划。`;
     return { ok: true, ...base, answer: text, route: null, pois: [poiOf(fromFinal.node)] };
   }
 
@@ -485,7 +548,31 @@ function typeLabel(type) {
   );
 }
 
-function describePosition(scene, node) {
+/**
+ * 一组地名是否共享同一个「出现在问题里」的公共词。
+ *
+ * 用途：判断用户是不是只提了一类地方。OSM 里同一类地标常有几十个节点
+ * （37 栋学生公寓、3 个食堂），若把它们当中两个配成起终点，就会得到
+ * 「从41号学生公寓到38号学生公寓」这种荒谬路线（实测复现）。
+ *
+ * @returns {string|null} 公共词（≥2 字且在 query 中出现），否则 null
+ */
+function sharedTerm(names, query) {
+  if (names.length < 2) return null;
+  const shortest = names.reduce((a, b) => (a.length <= b.length ? a : b));
+  for (let len = shortest.length; len >= 2; len -= 1) {
+    for (let start = 0; start + len <= shortest.length; start += 1) {
+      const term = shortest.slice(start, start + len);
+      if (!query.includes(term)) continue;
+      if (names.every((n) => n.includes(term))) return term;
+    }
+  }
+  return null;
+}
+
+/** 节点相对场景中心的方位（用于「X 位于场景的东北侧」这类描述）。
+ *  导出给 quest.js 复用，避免两处各写一份、写法不一致。 */
+export function describePosition(scene, node) {
   const xs = scene.nodes.map((n) => n.xy[0]);
   const ys = scene.nodes.map((n) => n.xy[1]);
   const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
@@ -494,6 +581,11 @@ function describePosition(scene, node) {
   const dy = node.xy[1] - cy;
   const vertical = dy > 40 ? '北' : dy < -40 ? '南' : '';
   const horizontal = dx > 40 ? '东' : dx < -40 ? '西' : '';
-  const dir = `${vertical}${horizontal}` || '中部';
-  return `的${dir}侧`;
+  // 组合方位必须用标准语序：东北/东南/西南/西北。
+  // 🔴 曾经直接拼 `${vertical}${horizontal}`，dy<0 且 dx<0 时输出「南西侧」（实测复现）。
+  if (vertical && horizontal) {
+    const combos = { 北东: '东北', 南东: '东南', 南西: '西南', 北西: '西北' };
+    return `的${combos[`${vertical}${horizontal}`] ?? `${vertical}${horizontal}`}侧`;
+  }
+  return `的${vertical || horizontal || '中部'}侧`;
 }

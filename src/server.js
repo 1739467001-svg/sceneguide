@@ -9,6 +9,7 @@ import { createAlipayClient } from './a2m/client.js';
 import { createOrderRepository } from './orders/repository.js';
 import { createGuideRouter } from './routes/guide.js';
 import { createFeedbackRouter } from './routes/feedback.js';
+import { createAccountRouter } from './routes/account.js';
 import { createDemoPayer } from './demo/pay.js';
 import { createAnalyticsStore } from './analytics/store.js';
 
@@ -18,6 +19,13 @@ const PUBLIC_DIR = path.resolve(import.meta.dirname, '..', 'public');
 export function createApp({ config, services, sellerId, repository, alipayClient, demoPayer, analytics }) {
   const app = express();
   app.disable('x-powered-by');
+  // 🔴 trust proxy：nginx 反代到 127.0.0.1:3001 后，不设这一项 req.ip 永远是
+  //    127.0.0.1——所有 IP 维度的限流（留言 50/日、回复、留资 5/日、免费试看）
+  //    会退化成「全站共享一个配额」：第 51 位评委开始所有人 429。
+  //    生产前置恰好一跳受信反代，trust proxy = 1 即取 X-Forwarded-For 最后一段
+  //    （nginx 的 $proxy_add_x_forwarded_for 追加上去的真实客户端）。
+  //    本地直连（无代理头）时 Express 自动回落 socket 地址，行为不变。
+  app.set('trust proxy', 1);
   // gzip：three.js 模块约 2MB，压缩后线上传输约 500KB——评委手机打开的体验差距就在这
   app.use(compression({ threshold: 1024 }));
   app.use(express.json());
@@ -66,12 +74,23 @@ export function createApp({ config, services, sellerId, repository, alipayClient
   });
 
   app.get('/healthz', (req, res) => {
+    // 带上两个库的体检结果：部署脚本的健康门只看 HTTP 200，
+    // 库损坏时页面照样能开——必须让「数据层坏了」在健康检查里可见。
+    const dbStatus = {};
+    for (const [name, store] of [['orders', repository], ['analytics', analytics]]) {
+      try {
+        dbStatus[name] = store.quickCheck?.() ?? 'unknown';
+      } catch (err) {
+        dbStatus[name] = `error: ${err.message}`;
+      }
+    }
     res.json({
       ok: true,
       env: config.env,
       gateway: config.gateway,
       appId: config.appId,
       sellerId,
+      db: dbStatus,
     });
   });
 
@@ -100,6 +119,9 @@ export function createApp({ config, services, sellerId, repository, alipayClient
       analytics,
     }),
   );
+
+  /* 买家账户中心：我的订单 / 权益额度 / 礼品码 / 售后 */
+  app.use(createAccountRouter({ repository, analytics }));
 
   /* ── 社区反馈墙：点赞 / 评论 / 举报 ── */
   app.use(createFeedbackRouter({ analytics }));
@@ -169,7 +191,22 @@ export function createApp({ config, services, sellerId, repository, alipayClient
     if (req.path.startsWith('/api/')) {
       return res.status(404).json({ code: 'NOT_FOUND', message: 'no such resource' });
     }
-    res.status(404).sendFile(path.join(PUBLIC_DIR, '404.html'));
+    // 404 页里的资源引用写成绝对路径（/styles.css、/#demo）在**子路径部署**下会全部落空：
+    // nginx 把 /sceneguide/ 前缀剥掉后，Node 看到的是 /some/deep/path，而浏览器仍停在
+    // 带前缀的地址上——绝对引用会打到宿主机根（线上实测 /styles.css → 404，错误页裸奔）。
+    // 因此按请求深度把绝对引用改写成相对引用；文件本身保持默认写法，直接打开也不难看。
+    const depth = req.path.split('/').filter(Boolean).length;
+    const prefix = '../'.repeat(Math.max(0, depth - 1)) || './';
+    let html;
+    try {
+      html = fs
+        .readFileSync(path.join(PUBLIC_DIR, '404.html'), 'utf8')
+        .replace(/(href|src)="\/([^"]*)"/g, `$1="${prefix}$2"`);
+    } catch {
+      // 读不到文件时退回原样发送，至少还是一个 404
+      return res.status(404).sendFile(path.join(PUBLIC_DIR, '404.html'));
+    }
+    res.status(404).type('html').send(html);
   });
 
   return app;

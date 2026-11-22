@@ -1,0 +1,15 @@
+{
+  "_comment": "生产配置模板。复制为 config/production.json（已在 .gitignore）后逐项填入真实值，填完后 ALIPAY_ENV=production 重启即生效。任何字段都不要提交进 git。",
+  "_fill_guide": {
+    "appId": "open.alipay.com 开放平台创建的『第三方应用/自研应用』的 APPID（20210 开头 16 位）；或控制台『密钥配置』步骤分配的应用",
+    "alipayPublicKey": "支付宝公钥（不是应用公钥！）——密钥配置页面/开放平台『查看支付宝公钥』，单行去掉头尾标记",
+    "privateKey": "应用私钥 PKCS#1（BEGIN RSA PRIVATE KEY）的 Base64 内容，与上面 appId 配对；Node 侧必须 PKCS#1，PKCS#8 会报 DECODER routines::unsupported",
+    "sellerId": "2088 开头的商户 PID（个人账号 = 陈俊烨 PID 2088032169158784，必须与 PAYATHON 报名账号一致）",
+    "gateway": "保持默认 https://openapi.alipay.com/gateway.do"
+  },
+  "appId": "FILL_ME",
+  "alipayPublicKey": "FILL_ME",
+  "privateKey": "FILL_ME",
+  "sellerId": "2088032169158784",
+  "gateway": "https://openapi.alipay.com/gateway.do"
+}

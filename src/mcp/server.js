@@ -92,9 +92,9 @@ export function createMcpHandler({ listScenes, answerGuide, createQuest, measure
       serverInfo: { name: 'scene-guide', title: '三维问路 SceneGuide', version: '1.0.0' },
       instructions:
         '本服务按次计费（支付宝 A2M 智能收 / HTTP 402）。首次调用 scene_guide 会返回 ' +
-        'payment_required 与一份 Payment-Needed 账单；请把该账单交给支付宝的 ' +
-        'alipay-pay-for-402-service 技能引导用户完成付款，再把得到的 Payment-Proof ' +
-        '作为 payment_proof 参数重新调用本工具。',
+        'payment_required 与一份 Payment-Needed 账单头（payment_needed_header，Base64URL 原文）；' +
+        '请把该账单头**原样**交给支付宝的 alipay-pay-for-402-service 技能引导用户完成付款，' +
+        '再把得到的 Payment-Proof 作为 payment_proof 参数重新调用本工具。',
     };
   }
 
@@ -102,7 +102,7 @@ export function createMcpHandler({ listScenes, answerGuide, createQuest, measure
     return { tools: [SCENES_TOOL, TOOL_DEF] };
   }
 
-  async function toolsCall(params) {
+  async function toolsCall(params, ctx = {}) {
     const name = params?.name;
     const args = params?.arguments ?? {};
 
@@ -166,15 +166,24 @@ export function createMcpHandler({ listScenes, answerGuide, createQuest, measure
       };
     }
 
-    // 未带凭证 → 返回支付挑战（这就是「发起支付」的前置）
+    // 未带凭证 → 发起一次**真实的** 402 支付挑战（内部回环付费资源路由）
+    //
+    // 🔴 为什么必须回环而不是自己拼账单：早期版本只在文本里让 Agent「去支付」，
+    //    既没有可支付的 Payment-Needed 账单头，订单也没落库。买方技能
+    //    （alipay-pay-for-402-service）拿不到账单头就无法引导用户付款；
+    //    即便用户以别的方式付了，回头带的 Payment-Proof 也查不到本地订单
+    //    （ORDER_NOT_FOUND）——整条 Agent 链路是断的（实测复现）。
+    //    回环真实路由后：订单落库、签名账单头、验付履约全部与 HTTP 路径一致。
     const isQuest = String(args.mode ?? 'guide') === 'quest';
-    const tier = isQuest
-      ? services.quest ?? { unitPrice: '9.90', label: '场景任务（研学）' }
-      : services.single ?? { unitPrice: '0.50', label: '单次导览' };
+    const tierName = isQuest ? 'quest' : 'single';
+    const tier = services[tierName] ?? services.single ?? { unitPrice: '0.50', label: '单次导览' };
+    const mode = String(args.mode ?? 'guide');
+    const level = String(args.level ?? 'normal');
 
+    // 免费预告：先本地算一次答案摘要（同时把明显无解的问题在收费前挡掉）
     let preview;
     if (isQuest) {
-      const q = createQuest({ sceneId, level: String(args.level ?? 'normal') });
+      const q = createQuest({ sceneId, level });
       if (!q.ok) return { isError: true, content: [{ type: 'text', text: q.error }] };
       preview = { summary: q.quest.brief, title: q.quest.title };
     } else {
@@ -185,28 +194,102 @@ export function createMcpHandler({ listScenes, answerGuide, createQuest, measure
       preview = { summary: result.answer ?? null };
     }
 
-    const outTradeNo = `SG_MCP_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
+    const selfBase =
+      process.env.SELF_BASE_URL ?? `http://127.0.0.1:${process.env.PORT ?? 3000}`;
+    const resourceUrl =
+      `${selfBase}/api/v1/guide?scene=${encodeURIComponent(sceneId)}` +
+      `&query=${encodeURIComponent(query)}&mode=${encodeURIComponent(mode)}` +
+      `&level=${encodeURIComponent(level)}` +
+      (isQuest ? '' : `&tier=${encodeURIComponent(tierName)}`);
+
+    let internalRes;
+    try {
+      internalRes = await fetch(resourceUrl, {
+        // 回环必须带上访客身份：否则订单归因与权益额度会落到「另一个人」身上
+        headers: ctx.visitorId ? { Cookie: `sg_vid=${ctx.visitorId}` } : {},
+        signal: AbortSignal.timeout(20000),
+      });
+    } catch (err) {
+      return {
+        isError: true,
+        content: [{ type: 'text', text: `无法连接付费资源端点：${err.message}` }],
+      };
+    }
+
+    // 已购额度 → 直接交付（不重复收费：买包用户的后续调用走余额扣减）
+    if (internalRes.status === 200) {
+      const body = await internalRes.json().catch(() => ({}));
+      const content = body.content ?? body;
+      const usage = measure(content);
+      return {
+        content: [
+          { type: 'text', text: content.answer ?? JSON.stringify(content) },
+          { type: 'text', text: JSON.stringify(content, null, 2) },
+        ],
+        structuredContent: { ...content, billing: billingSummary(usage) },
+      };
+    }
+
+    if (internalRes.status !== 402) {
+      const body = await internalRes.json().catch(() => ({}));
+      return {
+        isError: true,
+        content: [
+          {
+            type: 'text',
+            text: `服务端未返回支付挑战（HTTP ${internalRes.status}）：${JSON.stringify(body)}`,
+          },
+        ],
+      };
+    }
+
+    const paymentNeededHeader = internalRes.headers.get('payment-needed');
+    const challenge = await internalRes.json().catch(() => ({}));
+    if (!paymentNeededHeader) {
+      return {
+        isError: true,
+        content: [{ type: 'text', text: '402 响应缺少 Payment-Needed 头' }],
+      };
+    }
+
+    // 解码一份可读账单供 Agent 与人直接查看；原文仍以 Base64URL 透传，不得改动
+    let decoded = null;
+    try {
+      decoded = JSON.parse(Buffer.from(paymentNeededHeader, 'base64url').toString('utf8'));
+    } catch {
+      /* 解码失败不影响主流程：原文仍然有效 */
+    }
+
     return {
       content: [
         {
           type: 'text',
           text:
             '本工具为付费资源，需要先完成支付。\n' +
-            `商品：${tier.label}\n金额：¥${tier.unitPrice}\n` +
-            '请将下面的 Payment-Needed 账单交给支付宝 alipay-pay-for-402-service 技能，' +
-            '由它引导用户完成付款；随后把得到的 Payment-Proof 作为 payment_proof 参数再次调用本工具。',
+            `商品：${challenge.goods_name ?? tier.label}\n` +
+            `金额：¥${challenge.amount ?? tier.unitPrice}\n` +
+            `商户订单号：${challenge.out_trade_no ?? '—'}\n` +
+            '请把下面 structuredContent.payment_needed_header（Base64URL 原文）**原样**交给\n' +
+            '支付宝 alipay-pay-for-402-service 技能，由它引导用户完成付款；\n' +
+            '随后把得到的 Payment-Proof 以 Base64URL 编码作为 payment_proof 参数再次调用本工具。',
         },
       ],
       structuredContent: {
         status: 'payment_required',
-        out_trade_no: outTradeNo,
-        amount: String(tier.unitPrice),
-        currency: 'CNY',
-        goods_name: tier.label,
+        out_trade_no: challenge.out_trade_no,
+        amount: challenge.amount ?? String(tier.unitPrice),
+        currency: challenge.currency ?? 'CNY',
+        goods_name: challenge.goods_name ?? tier.label,
         resource_id: '/api/v1/guide',
+        // Base64URL 原文：买方技能只认这个，不得解码、不得改动
+        payment_needed_header: paymentNeededHeader,
+        // 解码后的可读账单（仅供展示，不参与任何签名或透传）
+        payment_needed: decoded,
         next: {
           skill: 'alipay-pay-for-402-service',
-          action: '完成支付后，把 Payment-Proof 原文以 Base64URL 编码作为 payment_proof 传回',
+          action:
+            '把 payment_needed_header 原样交给买方技能引导用户付款；完成后把得到的 ' +
+            'Payment-Proof 以 Base64URL 编码作为 payment_proof 参数再次调用本工具',
         },
         preview_answer: preview.summary,
         preview_title: preview.title ?? null,
@@ -216,7 +299,7 @@ export function createMcpHandler({ listScenes, answerGuide, createQuest, measure
   }
 
   /** JSON-RPC 分发 */
-  return async function handleMcp(body) {
+  return async function handleMcp(body, ctx = {}) {
     const { id = null, method, params = {} } = body ?? {};
 
     const reply = (result) => ({ jsonrpc: '2.0', id, result });
@@ -232,7 +315,7 @@ export function createMcpHandler({ listScenes, answerGuide, createQuest, measure
       case 'tools/list':
         return reply(await toolsList());
       case 'tools/call':
-        return reply(await toolsCall(params));
+        return reply(await toolsCall(params, ctx));
       default:
         return fail(-32601, `未实现的方法：${method}`);
     }

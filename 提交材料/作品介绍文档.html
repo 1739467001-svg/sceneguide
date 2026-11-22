@@ -47,7 +47,7 @@
   <div class="meta">演示地址：<b>http://121.43.80.231/sceneguide/</b> ｜ 代码：随作品交付（git 仓库，MIT）</div>
 
   <div class="kpis">
-    <div class="kpi"><b>62 项</b><span>可自行执行的验收断言</span></div>
+    <div class="kpi"><b>76 项</b><span>可自行执行的验收断言</span></div>
     <div class="kpi"><b>2 个</b><span>真实 OSM 场景（可切换）</span></div>
     <div class="kpi"><b>0%</b><span>个人开发者费率（至 12.31）</span></div>
     <div class="kpi"><b>5 步</b><span>完整支付协议链路</span></div>
@@ -64,10 +64,14 @@
     <li>点「生成核验卡 · 可分享」→ 打开<b>公开核验页</b>：脱敏交易号 + 证据哈希 + 距离端点</li>
     <li>左上切换「良渚文化村」→ 同一条管线换一个 bbox 就是新场景</li>
     <li>滚到底部「社区反馈」→ 留言、点赞——反馈按访客去重，墙上只有真实内容</li>
+    <li>买一次「十次导览包」→ 打开「我的账户」：额度到账、生成<b>礼品码</b>转赠、申请退款、打印收据——买家视角的完整生命周期</li>
   </ol>
-  <div class="callout">不想相信页面任何描述？一条命令自己验（会真实走一遍支付宝沙箱收银）：<br><code>BASE_URL=http://121.43.80.231/sceneguide bash scripts/verify.sh</code> → 63 项全绿</div>
+  <div class="callout">不想相信页面任何描述？一条命令自己验（会真实走一遍支付宝沙箱收银）：<br><code>BASE_URL=http://121.43.80.231/sceneguide bash scripts/verify.sh</code> → 76 项全绿</div>
 
   <h2><span class="no">03</span>支付集成（Machine Pay · 全链路）</h2>
+  <div style="margin:6px 0 14px">
+    <img src="architecture.svg" alt="A2M 402 支付链路架构图" style="width:100%;max-width:820px;border:1px solid var(--line);border-radius:8px"/>
+  </div>
   <table>
     <tr><th style="width:46%">环节</th><th>实现要点</th></tr>
     <tr><td>① 402 支付挑战</td><td>商家本地构造 Payment-Needed（字典序拼接 + RSA2 签名），<b>订单先落库再返回 402</b>；不调用预下单 OpenAPI</td></tr>

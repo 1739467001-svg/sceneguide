@@ -13,14 +13,17 @@ import { createQuest, issueCertificate } from '../scene/quest.js';
 import { getScene, listScenes } from '../scene/scenes.js';
 import { measure, priceFor, billingSummary } from '../metering/index.js';
 import { createMcpHandler } from '../mcp/server.js';
+import { finishedUnderTime } from '../orders/repository.js';
 import { hashIp } from '../analytics/store.js';
 
-/** 任务评分：基础分 + 全部完成 + 按时完成 */
+/** 任务评分：基础分 + 全部完成 + 按时完成。
+ *  「按时完成」用 repository.finishedUnderTime 判定——证书里的分数与库里的
+ *  score 必须是同一个口径（旧实现两边都无条件发加分，证书恒 150 分）。 */
 function computeQuestScore(quest) {
   let score = quest.scoring?.base ?? 100;
   for (const bonus of quest.scoring?.bonuses ?? []) {
     if (bonus.key === 'all_checkpoints') score += bonus.points;
-    if (bonus.key === 'under_time') score += bonus.points;
+    if (bonus.key === 'under_time' && finishedUnderTime(quest)) score += bonus.points;
   }
   return score;
 }
@@ -48,8 +51,10 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
    *  500 = 500 个访客额度的上限，办公室/宿舍楼一天也未必到；
    *  实测 200 会被高频验收 + 批量集成测试一天烧完（都是同 IP）。 */
   const FREE_DAILY_IP_LIMIT = 500;
-  /** 演示代付按 IP 的每日上限（沙箱接口真实出账，防刷爆） */
-  const DEMO_PAY_DAILY_IP_LIMIT = 100;
+  /** 演示代付按 IP 的每日上限（沙箱接口真实出账，防刷爆）。
+   *  可用 DEMO_PAY_DAILY_IP_LIMIT 覆盖（运维旋钮：本地反复跑验收脚本时调高，
+   *  生产部署保持默认 100）。 */
+  const DEMO_PAY_DAILY_IP_LIMIT = Number(process.env.DEMO_PAY_DAILY_IP_LIMIT ?? 100);
   /** 权益额度有效期（天）：多额度商品发放的次数余额在多久内有效 */
   const ENTITLEMENT_VALID_DAYS = 90;
 
@@ -165,8 +170,11 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
       });
 
       // 订单必须先落库再返回 402：否则买家付款后服务端查不到订单（ORDER_NOT_FOUND）
-      // 来源标注：demo=演示代付自测，api=外部真实调用（反刷量口径的核心字段）
-      const source = req.get('x-sg-demo') === '1' ? 'demo' : 'api';
+      // 🔴 source 只能由服务端判定：公开 402 端点恒为 'api'（外部真实调用）。
+      //    旧实现读客户端头 `x-sg-demo`——任一调用方自己带一个头就能把订单
+      //    标成「自测」、从「真实付费用户」里消失（评审数字可被定向压低，实测复现）；
+      //    服务端自测走 /api/v1/demo/pay 路由，它在拿到挑战后自行标记（见 markSelfTest）。
+      const source = 'api';
       await repository.createPending({
         outTradeNo,
         amount,
@@ -220,6 +228,54 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
         return createPaymentRequiredResponse(req, res);
       }
       const { paymentProof, tradeNo, clientSession } = parsed;
+
+      // 幂等重放短回路：同一笔凭证再次到来（官方流程明确允许——PENDING_CONFIRM
+      // 的存在意义就是「回执失败可用同一凭证重试」）。按本地订单状态分三种处理，
+      // 都不再调用远程验付。
+      // 🔴 为什么必须短回路：沙箱侧对重复验付/回执会返回**非标准响应**
+      //    （实测复现：返回值里找不到 *_response 键，SDK 抛「Response 格式错误」）。
+      //    而买家侧重放是正常行为，不能让一次沙箱抖动把「已经付过钱且已交付」
+      //    的订单变成错误页；也不能在回执未确认时偷偷交付（那违背幂等履约的设计）。
+      if (tradeNo) {
+        const existing = repository.findByTradeNo(tradeNo);
+        if (existing && existing.orderStatus === 'PAID' && existing.serviceResult) {
+          // ① 已完整履约：本地记录直接交付（already_fulfilled=true）
+          if (existing.fulfillStatus === 'FULFILLED') {
+            const entitlement = grantEntitlementForOrder(existing);
+            return sendResource(
+              res,
+              tradeNo,
+              existing.outTradeNo,
+              existing.resourceId,
+              existing.serviceResult,
+              true,
+              entitlement,
+            );
+          }
+          // ② 资源已生成但回执未确认：重试一次履约回执，成功才交付；
+          //    仍失败则明确告知「稍后用同一凭证重试」，不重复生成资源
+          if (existing.fulfillStatus === 'PENDING_CONFIRM') {
+            const confirmed = await alipayClient.confirmFulfillment({ tradeNo });
+            if (!confirmed.ok) {
+              return res.status(502).json({
+                code: 'FULFILLMENT_CONFIRM_FAILED',
+                message: '资源已生成但履约确认失败，请稍后使用同一 Payment-Proof 重试',
+              });
+            }
+            await repository.markFulfilled(existing.outTradeNo, tradeNo);
+            const entitlement = grantEntitlementForOrder(existing);
+            return sendResource(
+              res,
+              tradeNo,
+              existing.outTradeNo,
+              existing.resourceId,
+              existing.serviceResult,
+              false,
+              entitlement,
+            );
+          }
+        }
+      }
 
       const verified = await alipayClient.verifyPayment({ paymentProof, tradeNo, clientSession });
       if (!verified.ok) {
@@ -354,7 +410,14 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
     if (!consumed) return false;
 
     try {
-      const { serviceResult } = await generateResource(req);
+      const { serviceResult, usage } = await generateResource(req);
+      // 🔴 额度交付也必须落计量：旧实现只在 prepareFulfillment（付费路径）里写
+      //    usage_records，买包用户用余额的每一次调用都不进看板——pack10 用户
+      //    用掉 9 次，计量看板上这 9 次「不存在」（实测复现，看板系统性少算）。
+      //    这里补记，out_trade_no 指向原购买订单，口径与付费路径一致。
+      if (usage?.length) {
+        repository.recordUsage({ outTradeNo: consumed.outTradeNo, usage });
+      }
       analytics?.recordEvent(visitorId, 'entitlement_use', req.visitorRef, {
         tier: consumed.tier,
         remaining: consumed.remaining,
@@ -519,7 +582,6 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
       // 🔴 转发浏览器访客的 cookie + 来源标记：
       //    这样订单归因到真实访客，且 source=demo（反刷量口径：自测 ≠ 真实付费）
       const internalHeaders = {
-        'x-sg-demo': '1',
         // 演示链路要展示完整支付过程，不能被「额度直交付」短路
         'x-sg-ignore-entitlement': '1',
         ...(visitorCookie ? { Cookie: visitorCookie } : {}),
@@ -536,6 +598,12 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
       const paymentNeeded = challengeRes.headers.get('payment-needed');
       if (!paymentNeeded) {
         return res.status(400).json({ error: '响应缺少 Payment-Needed 头' });
+      }
+      // 🔴 服务端自标记：本路由是站内唯一自测入口，「这是自测」由服务端自己说，
+      //    不信任任何客户端头（公开 402 端点恒为 api，见 createPaymentRequiredResponse）。
+      const challengeBody = await challengeRes.clone().json().catch(() => ({}));
+      if (challengeBody.out_trade_no) {
+        repository.markSelfTest(challengeBody.out_trade_no);
       }
 
       // 2. 沙箱收银 → Payment-Proof → 重试原资源
@@ -612,7 +680,12 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
   /**
    * MCP 端点 —— 让 Agent 能「发现」本服务。
    * 对应 Agent Pay 赛道描述的第一环：Agent 发现服务。
+   *
+   * 支付挑战按 IP 限流：每次调用都会真实建单（落库 + 签名账单），
+   * 必须防 Agent 循环刷单把订单表刷爆。限额同为运维旋钮。
    */
+  const MCP_CHALLENGE_DAILY_IP_LIMIT = Number(process.env.MCP_CHALLENGE_DAILY_IP_LIMIT ?? 100);
+
   const mcp = createMcpHandler({
     listScenes,
     answerGuide,
@@ -624,7 +697,24 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
 
   router.post('/mcp', async (req, res) => {
     try {
-      const out = await mcp(req.body);
+      // 只限流「会建单」的调用：带凭证的验付调用与 tools/list 不计
+      const isChallengeCall =
+        req.body?.method === 'tools/call' && !req.body?.params?.arguments?.payment_proof;
+      if (isChallengeCall) {
+        const n = ipLimit(req, 'mcp_challenge');
+        if (n !== null && n > MCP_CHALLENGE_DAILY_IP_LIMIT) {
+          return res.json({
+            jsonrpc: '2.0',
+            id: req.body?.id ?? null,
+            error: {
+              code: -32000,
+              message: `今日支付挑战次数已达上限（${MCP_CHALLENGE_DAILY_IP_LIMIT}），请明天再试。`,
+            },
+          });
+        }
+      }
+      // ctx 带访客身份：内部回环的订单归因与权益额度才能落到同一个人身上
+      const out = await mcp(req.body, { visitorId: req.visitorId, refCode: req.visitorRef });
       if (out === null) return res.status(202).end();
       return res.json(out);
     } catch (err) {

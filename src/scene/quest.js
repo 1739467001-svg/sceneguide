@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { getScene } from './scenes.js';
-import { namedNodes, planRoute } from './index.js';
+import { namedNodes, planRoute, describePosition } from './index.js';
 
 /**
  * 场景任务（研学 / 寻宝）模式。
@@ -79,9 +79,36 @@ export function createQuest({ sceneId, checkpointNames = [], title, level = 'nor
   if (!scene) return { ok: false, error: 'SCENE_NOT_FOUND' };
 
   const named = namedNodes(scene);
-  const checkpoints = checkpointNames
-    .map((name) => named.find((n) => n.name === name || n.name.includes(name)))
-    .filter(Boolean);
+
+  // 🔴 解析用户点名的打卡点，两个必须先修的问题（2026-11-21 实测复现，
+  //    都发生在**已付费**的任务上）：
+  //    1) 空串：`''.includes` 恒真，而 `checkpoints=图书馆,` 的尾随逗号极常见——
+  //       空串会静默命中「第一个地标」，生成一个用户从未点名的打卡点；
+  //    2) 重复：同一个 node 出现两次时，仓储层对重复 point_id 直接返回
+  //       ALREADY_CHECKED_IN，而打卡又必须按序——用户第二次打到同一节点时
+  //       任务**永久卡死**，且已付费、无退还路径。
+  //    因此：丢空串、按 node.id 去重、把没识别的名字显式报出来。
+  const requested = checkpointNames.map((n) => String(n ?? '').trim()).filter(Boolean);
+  const byId = new Map();
+  const unresolved = [];
+  for (const name of requested) {
+    const node = named.find((n) => n.name === name || n.name.includes(name));
+    if (node) byId.set(node.id, node);
+    else unresolved.push(name);
+  }
+  const checkpoints = [...byId.values()];
+
+  // 用户明确点了名却凑不齐 2 个：显式报错，不要静默混入自动挑的点
+  // （旧行为把用户点的一个点和自动挑的混在一起，语义混乱）。
+  if (requested.length > 0 && checkpoints.length < 2) {
+    return {
+      ok: false,
+      error:
+        `至少需要 2 个可识别的打卡点（收到 ${requested.length} 个，识别 ${checkpoints.length} 个` +
+        `${unresolved.length ? `；未识别：${unresolved.join('、')}` : ''}）`,
+      unresolved,
+    };
+  }
 
   if (checkpoints.length < 2) {
     // 没指定就自动挑三个站点：
@@ -182,6 +209,15 @@ export function createQuest({ sceneId, checkpointNames = [], title, level = 'nor
     checkpoints.push(start, mid ?? end, end);
   }
 
+  // 兜底：不管走哪条分支，打卡点在生成任务前必须是**互不相同**的节点。
+  // 重复节点 = 任务永远无法完成（仓储层按 point_id 主键拒绝重复打卡）。
+  const uniqueCheckpoints = [...new Map(checkpoints.map((c) => [c.id, c])).values()];
+  if (uniqueCheckpoints.length < 2) {
+    return { ok: false, error: 'NOT_ENOUGH_CHECKPOINTS' };
+  }
+  checkpoints.length = 0;
+  checkpoints.push(...uniqueCheckpoints);
+
   const legs = [];
   let totalDistance = 0;
   for (let i = 0; i < checkpoints.length - 1; i += 1) {
@@ -202,22 +238,32 @@ export function createQuest({ sceneId, checkpointNames = [], title, level = 'nor
   // 🔴 线索必须**按打卡点**生成，而不是按路段：
   //    N 个打卡点只有 N-1 段路，若线索也按路段生成，最后一站就没有线索、
   //    用户永远打不到最后一张卡，任务无法完成。
+  // 🔴 线索必须回答「怎么从上一站来到第 i 站」，而不是「从第 i 站出发去哪」。
+  //    旧实现用 legs[i]（从第 i 站出发的路段）配「第 i+1 站」的 hint：
+  //    首站没有任何「如何找到它」的线索，最后一条线索退化成通用填充文本，
+  //    「线索链」这个核心卖点名不副实（实测复现）。
+  //    第 1 站的线索描述起点方位（用户在场景里先要找到它）。
   const clues = checkpoints.map((cp, i) => {
-    if (i < legs.length) {
-      const leg = legs[i];
-      const template = CLUE_TEMPLATES[i % CLUE_TEMPLATES.length];
+    if (i === 0) {
       return {
-        index: i + 1,
-        text: template(leg.from, leg.to),
-        hint: `第 ${i + 1} 站：${cp.name}`,
+        index: 1,
+        text: `起点是「${cp.name}」${describePosition(scene, cp)}。从这里出发，按线索逐站前进。`,
+        hint: `第 1 站（起点）：${cp.name}`,
       };
     }
-    // 终点：到达即完成
-    const last = legs[legs.length - 1];
+    const leg = legs[i - 1]; // 从第 i-1 站到第 i 站的那段路
+    const template = CLUE_TEMPLATES[(i - 1) % CLUE_TEMPLATES.length];
+    // 难度决定线索粒度：easy 给方位+距离，normal 给路线提示，hard 只给相对方位
+    const detail =
+      level === 'easy'
+        ? `（约 ${Math.round(leg.distance_m)} 米，朝${describeSide(leg.to, leg.from)}）`
+        : level === 'hard'
+          ? ''
+          : '';
     return {
       index: i + 1,
-      text: `沿上一站的指引继续前进，即可抵达终点「${cp.name}」——到达后本任务完成。`,
-      hint: `第 ${i + 1} 站（终点）：${cp.name}`,
+      text: template(leg.from, leg.to) + detail,
+      hint: `第 ${i + 1} 站：${cp.name}`,
     };
   });
 

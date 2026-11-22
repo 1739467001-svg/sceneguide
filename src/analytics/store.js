@@ -34,6 +34,21 @@ export function createAnalyticsStore({ file = 'data/analytics.db' } = {}) {
 
   const db = new Database(dbFile);
   db.pragma('journal_mode = WAL');
+  // 与订单库同口径：FULL 同步保持久化（访客归因与反馈墙也是「发生过」的证据）
+  db.pragma('synchronous = FULL');
+  // 启动体检：损坏时大声报告，不要让归因/反馈数据悄悄丢失
+  try {
+    const check = db.pragma('quick_check', { simple: true });
+    if (check !== 'ok') {
+      console.error(
+        `\n🔴🔴🔴 [db] analytics.db 体检未通过：${check}\n` +
+        '   归因/反馈数据可能已损坏。恢复：sqlite3 data/analytics.db ".recover" > /tmp/r.sql\n' +
+        '   → sqlite3 data/analytics.db.new < /tmp/r.sql → 换入重启。日常体检：node scripts/db-check.mjs\n',
+      );
+    }
+  } catch (err) {
+    console.error(`🔴 [db] analytics.db 体检失败：${err.message}`);
+  }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS referrals (
@@ -96,6 +111,16 @@ export function createAnalyticsStore({ file = 'data/analytics.db' } = {}) {
       PRIMARY KEY (feedback_id, visitor_id)
     );
 
+    -- 举报去重：一位访客对同一条反馈只计一票。
+    -- 🔴 没有这张表时，同一个人连点 3 次就能把任意反馈刷到自动隐藏——
+    --    与「不同访客各自举报，不给一键下架的能力」的设计承诺相悖（实测复现）。
+    CREATE TABLE IF NOT EXISTS feedback_reports (
+      feedback_id INTEGER NOT NULL,
+      visitor_id  TEXT NOT NULL,
+      created_at  TEXT NOT NULL,
+      PRIMARY KEY (feedback_id, visitor_id)
+    );
+
     -- 回复：评审要的是「交流反馈」而不只是评论——墙上是可来回对话的线程
     CREATE TABLE IF NOT EXISTS feedback_replies (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -108,11 +133,30 @@ export function createAnalyticsStore({ file = 'data/analytics.db' } = {}) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_fb_replies ON feedback_replies(feedback_id, created_at);
+
+    -- 机构采购留资：B 端商业动作的入口（研学机构/学校批量采购十次包）。
+    -- 与反馈墙的隐私口径不同：这里是**有意收集**联系方式用于采购对接，
+    -- 因此界面明示「仅用于本次对接、不出现在任何公开页面」，且不提供任何读取接口。
+    CREATE TABLE IF NOT EXISTS leads (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      org        TEXT NOT NULL,
+      contact    TEXT NOT NULL,
+      scale      TEXT,
+      note       TEXT,
+      visitor_id TEXT,
+      ip_hash    TEXT,
+      created_at TEXT NOT NULL
+    );
   `);
 
   const now = () => new Date().toISOString();
 
   return {
+    /** 库体检（/healthz 与 scripts/db-check.mjs 用）：返回 'ok' 或损坏描述 */
+    quickCheck() {
+      return db.pragma('quick_check', { simple: true });
+    },
+
     /** 注册渠道码（幂等） */
     ensureRef(code, label) {
       db.prepare('INSERT OR IGNORE INTO referrals (code, label, created_at) VALUES (?, ?, ?)').run(
@@ -162,6 +206,43 @@ export function createAnalyticsStore({ file = 'data/analytics.db' } = {}) {
     visitorRef(visitorId) {
       const row = db.prepare('SELECT ref_code FROM visitors WHERE id = ?').get(visitorId);
       return row?.ref_code ?? null;
+    },
+
+    /** 访客摘要（买家账户中心用：首触渠道 + 访问次数，不含任何身份信息） */
+    visitorSummary(visitorId) {
+      const row = db
+        .prepare('SELECT ref_code, visits, first_seen FROM visitors WHERE id = ?')
+        .get(visitorId);
+      if (!row) return null;
+      return {
+        refCode: row.ref_code ?? null,
+        visits: row.visits ?? 0,
+        firstSeen: row.first_seen ?? null,
+      };
+    },
+
+    /* ────────────── 机构采购留资 ────────────── */
+
+    /** 写入一条采购留资（按 IP 限流由路由层控制） */
+    addLead({ org, contact, scale, note, visitorId, ip }) {
+      db.prepare(
+        `INSERT INTO leads (org, contact, scale, note, visitor_id, ip_hash, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        org,
+        contact,
+        scale ?? null,
+        note ?? null,
+        visitorId ?? null,
+        ip ? hash(ip) : null,
+        now(),
+      );
+      return db.prepare('SELECT changes() AS n').get().n > 0;
+    },
+
+    /** 留资条数（商家侧核对用；不提供内容读取接口） */
+    leadCount() {
+      return db.prepare('SELECT COUNT(*) AS n FROM leads').get().n;
     },
 
     recordEvent(visitorId, type, refCode, meta) {
@@ -331,9 +412,25 @@ export function createAnalyticsStore({ file = 'data/analytics.db' } = {}) {
      * 举报：累计举报数达到阈值即自动隐藏。
      * 阈值设计得高（3 次）——不同访客各自举报，不给恶意刷量者一键下架的能力。
      */
-    reportFeedback(feedbackId) {
+    /** 举报一条反馈。
+     *  🔴 按**访客**去重：旧实现同一访客连点 3 次即可把任意反馈刷到自动隐藏，
+     *    与注释承诺的「不同访客各自举报，不给一键下架的能力」相悖（实测复现：
+     *    评委在现场试用举报按钮 3 下，墙上真实反馈就消失了——影响力维度自伤）。
+     *    现在反馈_reports 复合主键保证一人一票，阈值是「≥3 个不同访客」。 */
+    reportFeedback(feedbackId, visitorId) {
       const row = db.prepare('SELECT reports, status FROM feedback WHERE id = ?').get(feedbackId);
       if (!row) return null;
+      // 一人一票：重复举报不累加，直接返回当前状态
+      const already = db
+        .prepare('SELECT 1 AS x FROM feedback_reports WHERE feedback_id = ? AND visitor_id = ?')
+        .get(feedbackId, visitorId);
+      if (already) return { reports: row.reports, status: row.status, duplicate: true };
+
+      db.prepare('INSERT INTO feedback_reports (feedback_id, visitor_id, created_at) VALUES (?, ?, ?)').run(
+        feedbackId,
+        visitorId,
+        now(),
+      );
       const reports = row.reports + 1;
       const status = reports >= 3 ? 'HIDDEN' : row.status;
       db.prepare('UPDATE feedback SET reports = ?, status = ? WHERE id = ?').run(

@@ -14,6 +14,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const DEMO_SCENE = {
   id: 'demo-park',
@@ -68,9 +69,14 @@ function loadScenesFromDisk() {
   // 🔴 场景目录可外部指定（SCENE_DIR）：容器里场景数据烤进镜像 /app/scenes，
   //    而 /app/data 是数据库卷——两者分离后，卷挂载**不可能**再遮蔽场景数据
   //    （历史上在 aliyun 因为 ./data 挂载遮住 app/data/scenes，线上少了一个场景）。
-  const dir = process.env.SCENE_DIR
-    ? path.resolve(process.env.SCENE_DIR)
-    : path.resolve(process.cwd(), 'data', 'scenes');
+  // 🔴 默认路径按**本文件位置**解析，不按进程 cwd：验收脚本会在仓库根目录跑
+  //    `node scene-guide/scripts/smoke.js`，按 cwd 解析会一个真实场景都加载不到，
+  //    所有内核检查随之静默失败（2026-11-21 实测复现：套件里 smoke 挂、单独跑过）。
+  const defaultDir = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '..', '..', 'data', 'scenes',
+  );
+  const dir = process.env.SCENE_DIR ? path.resolve(process.env.SCENE_DIR) : defaultDir;
   if (!fs.existsSync(dir)) {
     console.warn(`[scenes] 场景目录不存在：${dir}`);
     return;

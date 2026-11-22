@@ -9,9 +9,33 @@ import { toPem } from './protocol.js';
  *   2. alipay.aipay.agent.payment.verify      —— 校验支付凭证
  *   3. alipay.aipay.agent.fulfillment.confirm —— 履约回执
  *
- * 对比网站支付/APP 支付需要 6 个接口（下单/查询/退款/退款查询/关闭/异步通知），
+ * 对比网站支付/APP 支付需要 6 个接口（下单/查询/退款/关闭/异步通知），
  * 按量付费的工程量明显更小。
+ *
+ * 🔴 沙箱抖动实录（本项目实测，频率约 1/5～1/10）：
+ *    verify 与 confirm 都会偶发返回**非标准响应**（缺 *_response 键，
+ *    SDK 抛「Response 格式错误」）。这不是业务拒绝，是通道抖动——
+ *    同一请求重试即可成功。因此这里对「解析失败」做有界重试
+ *    （1s/2s/3s 退避，共 4 次）；业务拒绝（code != 10000）不重试，
+ *    原样返回给路由层按协议处理。
  */
+const MALFORMED_RETRY_DELAYS = [1000, 2000, 3000];
+
+/** 执行 OpenAPI；仅对「响应无法解析」重试，业务结果原样返回 */
+async function execWithRetry(sdk, api, bizContent) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const response = await sdk.exec(api, { bizContent });
+      return { ok: true, response };
+    } catch (err) {
+      if (attempt >= MALFORMED_RETRY_DELAYS.length) {
+        return { ok: false, error: err };
+      }
+      await new Promise((r) => setTimeout(r, MALFORMED_RETRY_DELAYS[attempt]));
+    }
+  }
+}
+
 export function createAlipayClient(config) {
   const sdk = new AlipaySdk({
     appId: config.appId,
@@ -27,12 +51,24 @@ export function createAlipayClient(config) {
      * bizContent 使用 snake_case（与官方 Node 参考实现一致）：
      *   payment_proof / trade_no / client_session
      * client_session 由买方 Agent 生成，必须原样透传，不得修改或缓存。
+     *
+     * SDK 对非标准响应会**抛异常**（实测：沙箱偶发返回缺键响应，抛「Response 格式错误」）。
+     * 这里统一兜成 { ok: false }，让路由层按业务错误处理，而不是 500 崩掉整条链路。
      */
     async verifyPayment({ paymentProof, tradeNo, clientSession }) {
       const bizContent = { payment_proof: paymentProof, trade_no: tradeNo };
       if (clientSession) bizContent.client_session = clientSession;
 
-      const response = await sdk.exec('alipay.aipay.agent.payment.verify', { bizContent });
+      let response;
+      const attempt = await execWithRetry(sdk, 'alipay.aipay.agent.payment.verify', bizContent);
+      if (!attempt.ok) {
+        return {
+          ok: false,
+          errorCode: 'ALIPAY_RESPONSE_MALFORMED',
+          errorMessage: `验付接口响应异常（已重试）: ${attempt.error.message}`,
+        };
+      }
+      response = attempt.response;
       const data =
         response?.alipay_aipay_agent_payment_verify_response ?? response ?? {};
 
@@ -56,11 +92,22 @@ export function createAlipayClient(config) {
       };
     },
 
-    /** 发送履约回执。失败时不得返回成功交付，应保留服务结果允许同一笔 Payment-Proof 重试。 */
+    /** 发送履约回执。失败时不得返回成功交付，应保留服务结果允许同一笔 Payment-Proof 重试。
+     *  与 verifyPayment 同口径：解析失败有界重试，业务拒绝原样返回。 */
     async confirmFulfillment({ tradeNo }) {
-      const response = await sdk.exec('alipay.aipay.agent.fulfillment.confirm', {
-        bizContent: { trade_no: tradeNo },
+      let response;
+      // 注意：execWithRetry 内部负责包 { bizContent }，这里只传业务体本身
+      const attempt = await execWithRetry(sdk, 'alipay.aipay.agent.fulfillment.confirm', {
+        trade_no: tradeNo,
       });
+      if (!attempt.ok) {
+        return {
+          ok: false,
+          errorCode: 'ALIPAY_RESPONSE_MALFORMED',
+          errorMessage: `履约回执接口响应异常（已重试）: ${attempt.error.message}`,
+        };
+      }
+      response = attempt.response;
       const data =
         response?.alipay_aipay_agent_fulfillment_confirm_response ?? response ?? {};
 

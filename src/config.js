@@ -118,6 +118,20 @@ export function loadServices({ env = 'sandbox' } = {}) {
       throw new Error(`档位 ${name} 单价必须在 0.01–50 元之间`);
     }
 
+    // 🔴 生产环境必须校验 serviceId 是真家伙（2026-11-21 实测的防护断裂）：
+    //    旧实现在 loadProductionConfig 里检查 production.json 顶层的 serviceId
+    //    字段——但那是个**死字段**，支付实际用的是 services.json 里
+    //    tiers[].serviceId（三个档位都是 api_mock_service_id），生产环境对它零校验。
+    //    后果：ALIPAY_ENV=production 能正常启动，然后每一笔支付挑战都带着 mock
+    //    serviceId 去收银 → SERVICE_PRICE_MISMATCH 拒单（且沙箱 ¥0.01 归一化
+    //    只改价不改 id，mock 注册价恰是 0.01，与生产价必然错配）。
+    if (env === 'production' && String(tier.serviceId ?? '').trim() === 'api_mock_service_id') {
+      throw new Error(
+        `生产环境拒绝启动：档位 ${name} 的 serviceId 仍是沙箱占位符 api_mock_service_id。` +
+        '请先在支付宝服务市场注册真实服务，把 config/services.json 里该档位的 serviceId 换成真实值。',
+      );
+    }
+
     out[name] = { ...tier, unitPrice, productionPrice };
   }
   return out;

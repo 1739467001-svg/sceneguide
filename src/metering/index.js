@@ -21,16 +21,23 @@ export const METERS = {
   tokens: { unit: 'token', label: '模型 token 消耗' },
   distance_m: { unit: 'm', label: '规划路径总长度' },
   poi_count: { unit: 'poi', label: '返回点位数量' },
+  clue_count: { unit: 'clue', label: '任务线索数量' },
 };
 
 /**
  * 从一次导览结果里抽取用量。
- * token 消耗当前用字符数估算，接入真实模型后换成 usage 字段即可。
+ *
+ * 🔴 token 估算口径（2026-11-21 修正）：旧公式是
+ *    `(answer.length + JSON.stringify(result).length) / 2`——
+ *    JSON 串**已经包含 answer 全文**，answer 被计入两次，token 数系统性虚高
+ *    约 answer.length/2（3–8%）。评审手动复算「(结果 JSON 字符数)/2」时
+ *    与看板数字对不上——这正好打在「所有数字可核验」这个卖点上。
+ *    现在口径单一且可复算：**整个交付 JSON 的字符数 ÷ 2**。
+ *    （中文内容约 2 字符/token；接入真实模型后改用 usage 字段，公式随之替换。）
  */
 export function measure(result) {
-  const answerLength = String(result?.answer ?? '').length;
   const jsonLength = JSON.stringify(result ?? {}).length;
-  const estimatedTokens = Math.ceil((answerLength + jsonLength) / 2); // 中文约 2 字符/token
+  const estimatedTokens = Math.ceil(jsonLength / 2);
 
   const route = result?.route;
   const quest = result?.quest;
@@ -63,7 +70,7 @@ export function billingSummary(usageRows) {
 
 function unitSuffix(meter, unit) {
   return (
-    { call: ' 次', token: ' token', m: ' 米', poi: ' 个' }[unit] ??
+    { call: ' 次', token: ' token', m: ' 米', poi: ' 个', clue: ' 条' }[unit] ??
     ` ${unit}`
   );
 }
