@@ -2,6 +2,6 @@
 <!-- ⚠️ 换域名/换部署前缀时，必须同步修改下面的 <loc>（sitemap 规范要求绝对 URL，
      相对路径会被大多数爬虫忽略）。deploy/https/enable-https.sh 收尾时会提醒这一步。 -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>http://121.43.80.231/sceneguide/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
-  <url><loc>http://121.43.80.231/sceneguide/introduction.html</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://121.43.80.231/sceneguide/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>https://121.43.80.231/sceneguide/introduction.html</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
 </urlset>

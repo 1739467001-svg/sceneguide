@@ -42,8 +42,11 @@ async function main() {
   const port = 9700 + Math.floor(Math.random() * 200);
   const chrome = spawn(CHROME, [
     '--headless=new', '--no-sandbox', '--hide-scrollbars',
-    // 2026-11-22：系统代理（Clash TUN）会劫持直连 IP 的 http 请求 → chrome-error://chromewebdata
-    '--no-proxy-server',
+    // ⚠️ Chrome 的 HTTPS 自动升级会把 http://<IP> 升级成 https://<IP>，而裸 IP 的 443
+    //    没有 TLS → 直接落到 chrome-error://chromewebdata/（实测 2026-11-23）。
+    //    禁用该升级后页面正常加载。这是浏览器安全策略，与作品无关，但必须显式关掉，
+    //    否则「渲染验收」会误报成产品失败。
+    '--disable-features=HttpsUpgrades,HttpsFirstModeV2,HttpsFirstBalancedModeAutoEnable',
     // 独立 profile：避免与正在使用的 Chrome 实例抢默认 profile
     `--user-data-dir=/tmp/sg-verify-render-${port}`,
     '--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader',

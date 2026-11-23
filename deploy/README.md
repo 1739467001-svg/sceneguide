@@ -1,110 +1,87 @@
-# 部署
+# SceneGuide · 裸 IP HTTPS（Let's Encrypt shortlived）
 
-> 目标：把作品从 localhost 部署到公网，供评委访问。
-> ⚠️ 前置：正式收款前域名需完成 **ICP 备案**（备案主体须与支付宝账号主体一致，
-> 阿里云境内服务器可在控制台直接发起，周期约 7–20 天）。备案期间可先用 IP 或测试域名联调。
+> 2026-11-23 上线。解决的问题：**Chrome 157 起会把 `http://<裸IP>` 自动升级为 `https://<裸IP>`**，
+> 若 443 没有有效 TLS，浏览器**硬拦截**到 `chrome-error://chromewebdata/`——
+> 不是警告页、也没有「继续访问」链接，评委点开演示链接会看到一片空白。
+>
+> 常规解法是「买域名 + ICP 备案 + 上证书」，但比赛只剩 16 天，备案周期（7–20 天）不可控。
+> 突破口：**Let's Encrypt 已支持为裸 IP 签发短期证书**（`shortlived` profile，SAN = `IP:x.x.x.x`，
+> 有效期约 6 天）——**不需要域名、不需要备案**。
 
----
-
-## 🔴 现网实况（2026-11-20 更新，以本节为准）
-
-**现网跑的是 Docker Compose，不是下面「步骤」里描述的裸机 systemd 路径**（那条路径已退役，
-保留在下方仅作历史记录）。当前实况：
-
-| 项 | 值 |
-|---|---|
-| 线上地址 | `http://121.43.80.231/sceneguide/`（aliyun，1.6G 内存） |
-| 运行方式 | Docker Compose（`kit-sg60/compose.yml`，容器 `sceneguide`，镜像 `sceneguide:1.0`） |
-| 宿主机目录 | `/srv/apps/sceneguide/app/`（代码）+ `/srv/apps/sceneguide/data/`（卷） |
-| 端口 | 容器 3000 → 宿主机 `127.0.0.1:3001`（仅回环，外网不可直连） |
-| 对外反代 | 共享 nginx 的 location 片段 `kit-sg60/nginx-sceneguide.conf`，前缀 `/sceneguide/` |
-| 发布命令 | `TARGET=aliyun bash deploy/deploy.sh`（本机构建 amd64 镜像 → 上传镜像 → `compose up -d` 重建容器 → 健康检查，约 1–2 分钟） |
-| 运行环境 | `ALIPAY_ENV=sandbox`（沙箱；切生产见下方「生产密钥」） |
-| HTTPS | **未启用**（域名备案中）。就绪包在 `https/`，备案通过后一条命令启用 |
-
-> 🔴 **2026-11-21 关键修正**：compose 只挂 `./data`，`src/` 与 `public/` **全烤在镜像里**。
-> 因此「上传代码 + `docker compose restart`」**不会让新代码生效**——容器跑的仍是旧镜像，
-> 而健康检查一切正常（线上曾因此长期停在旧版本，极难察觉）。
-> 正确做法已写进 `deploy.sh`：本机构建 amd64 镜像 → `docker save` 上传 → `docker load`
-> → `docker compose up -d`（重建容器）。**`restart` 不换镜像，`up -d` 才换。**
-
-> `kit-sg60/DEPLOY.md` 里的访问地址（60.205.204.162）是 sg60 还是主力机时的旧记录，
-> 该机安全组未放行 22/80（ICMP 通、TCP 不通，非死机）；同一套 kit 平移到 aliyun 继续当生产用。
-
-### 备案通过后的 HTTPS 一键启用
+## 一次性安装（在服务器上执行）
 
 ```bash
-sudo bash deploy/https/enable-https.sh <你的域名>
+# 1) 取得 lego（新版才有 --profile；旧版 certbot 2.9 客户端自己就会拒绝 IP）
+curl -sSL -o /tmp/lego.tar.gz \
+  "https://github.com/go-acme/lego/releases/download/v5.7.0/lego_v5.7.0_linux_amd64.tar.gz"
+tar -xzf /tmp/lego.tar.gz -C /tmp lego && install -m 0755 /tmp/lego /usr/local/bin/lego
+
+# 2) 签发（http-01 校验需要占用 80 端口 → 短暂停 nginx）
+systemctl stop nginx
+/usr/local/bin/lego run --email <你的邮箱> --accept-tos \
+  --http --http.address :80 --path /root/.lego --profile shortlived \
+  -d 121.43.80.231
+systemctl start nginx
 ```
 
-脚本自动：装 certbot → 签证书 → 装独立 server 块（80 跳 HTTPS + 443 反代 `/sceneguide/`）→
-`nginx -t` 通过才 reload（失败自动回滚）。详见 `https/` 目录。
+产物：`/root/.lego/certificates/121.43.80.231.{crt,key}`（`issuer.crt` 同目录）。
 
----
+## nginx 配置
 
-## 文件
+`/etc/nginx/conf.d/sceneguide-https.conf`：
 
-| 文件 | 用途 |
-|---|---|
-| `deploy.sh` | 一键发布（Compose 路径为现网主力；systemd 路径为历史备用） |
-| `kit-sg60/` | 现网 Compose 套件：compose.yml + nginx location 片段 + 运维手册 |
-| `https/` | HTTPS 就绪包：nginx 443 server 块模板 + certbot 一键脚本 |
-| `sceneguide.service` | 【历史】裸机 systemd 单元（已退役路径） |
-| `nginx.conf` | 【历史】裸机 nginx 站点模板（已退役路径，端口描述与 service 文件有出入，勿直接使用） |
-| `服务器部署清单.md` | 真实线上状态、踩坑记录与升级七步 |
+```nginx
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name 121.43.80.231 _;
 
-## 步骤
+    ssl_certificate     /root/.lego/certificates/121.43.80.231.crt;
+    ssl_certificate_key /root/.lego/certificates/121.43.80.231.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
 
-### 1. 服务器侧（一次性）
+    include /etc/nginx/app-routes/sceneguide.conf;   # 与 80 端口同一份子路径路由
 
-```bash
-# 上传部署配置
-scp -r deploy/ user@<服务器IP>:/tmp/sceneguide-deploy
-
-# 在服务器上安装 systemd 单元与 nginx 配置
-sudo cp /tmp/sceneguide-deploy/sceneguide.service /etc/systemd/system/
-sudo cp /tmp/sceneguide-deploy/nginx.conf /etc/nginx/sites-available/sceneguide
-sudo ln -sf /etc/nginx/sites-available/sceneguide /etc/nginx/sites-enabled/
-sudo mkdir -p /opt/sceneguide && sudo chown $USER /opt/sceneguide
-```
-
-### 2. 发布（每次更新后）
-
-```bash
-SERVER=user@<服务器IP> bash deploy/deploy.sh
-```
-
-脚本会：rsync 代码（排除 node_modules / data / 密钥）→ `npm ci --omit=dev` →
-重启 systemd 服务 → `curl /healthz` 健康检查。
-
-### 3. 生产密钥（`service_id` 审核通过后）
-
-在服务器上 `scene-guide/config/production.json` 写入：
-
-```json
-{
-  "appId": "正式应用AppId",
-  "alipayPublicKey": "支付宝公钥",
-  "privateKey": "应用私钥（base64 DER）",
-  "sellerId": "正式商户PID（2088）",
-  "serviceId": "服务市场注册返回的真实 serviceId"
+    location = / { return 302 /sceneguide/; }
+    location / { return 404; }
 }
 ```
 
-以 `ALIPAY_ENV=production` 启动（service.service 里已设置）。
-**`production.json` 已在 .gitignore 中，永远不会进版本库。**
+> ⚠️ 老版 nginx（1.18）**不支持 `http2 on;`** 指令——写在 `listen 443 ssl http2;` 里，
+> 写错会直接 `nginx -t` 失败（unknown directive "http2"）。
 
-### 4. HTTPS（备案通过后）
+## 自动续期（证书只有 6 天有效期，必须续）
+
+`/usr/local/bin/lego-renew.sh` + `sg-cert-renew.timer`（每 12 小时检查一次，
+剩余有效期 < 3 天才续，续期时短暂停 nginx 再 reload）。
 
 ```bash
-sudo bash deploy/https/enable-https.sh <你的域名>
+systemctl enable --now sg-cert-renew.timer
+systemctl list-timers sg-cert-renew.timer
+tail -20 /var/log/sg-cert-renew.log
 ```
-
-（旧的手动步骤 `certbot --nginx` 亦可，但会改写现有 server 块；
-`https/enable-https.sh` 装的是独立 server 块，不动共享 nginx 的现有配置，失败可回滚。）
 
 ## 验证
 
 ```bash
-BASE_URL=http://121.43.80.231/sceneguide bash scripts/verify.sh   # 76 项验收（含 MCP Agent 链路与买家账户中心）
+# 证书链有效（不加 -k）
+curl -s -o /dev/null -w "%{http_code}\n" https://121.43.80.231/sceneguide/
+openssl s_client -connect 121.43.80.231:443 </dev/null | grep -A1 "subject alternative"
+
+# 模拟评委：Chrome 默认参数访问 http:// 应自动升级并成功加载
+node scripts/probe-render.mjs    # BASE_URL 默认打 http://121.43.80.231/sceneguide
 ```
+
+## 副作用（好事）
+
+安全上下文成立 → **Service Worker 正常注册 → PWA「可安装」（桌面应用交付形态）真实可用**
+（此前 HTTP 部署下这一承诺不成立）。`public/app.js` 的 SW 注册逻辑本身已按
+`window.isSecureContext` 判断，无需改动。
+
+## 兜底
+
+- 证书万一过期：`sg-cert-renew.timer` 会在 12 小时内自动重签
+- 极端情况下证书失效，HTTP 入口仍可用：`http://121.43.80.231/sceneguide/`
+  （Safari / Firefox / 内嵌浏览器不会自动升级，可直接用）

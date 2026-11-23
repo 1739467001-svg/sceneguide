@@ -25,7 +25,7 @@ description: 当用户询问某个具体场所（校园、园区、景区、展�
 向以下 URL 发起请求（演示环境已上线，可直接调用）：
 
 ```
-curl -v "http://121.43.80.231/sceneguide/api/v1/guide?scene=<场景ID>&query=<用户问题>&origin=<可选起点>&tier=<可选档位>"
+curl -v "https://121.43.80.231/sceneguide/api/v1/guide?scene=<场景ID>&query=<用户问题>&origin=<可选起点>&tier=<可选档位>"
 ```
 
 参数说明：
@@ -35,7 +35,7 @@ curl -v "http://121.43.80.231/sceneguide/api/v1/guide?scene=<场景ID>&query=<�
 | `scene` | 否 | 场景 ID，默认 `demo-park`；推荐 `zjgsu-xiasha`（真实校园，134 地标） |
 | `query` | 是 | 用户的导览问题（自然语言） |
 | `origin` | 否 | 起点名称，用于「去某地」类问题 |
-| `tier` | 否 | 计费档位：`single`（单次）｜`pack10`（十次包） |
+| `tier` | 否 | 计费档位：`single`（单次）｜`pack10`（十次包）｜`trial`（首发半价，同单次） |
 
 场景目录：`GET /api/v1/scenes`
 

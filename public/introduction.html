@@ -44,7 +44,7 @@
   <div class="meta">PAYATHON 2026 · 支付宝 AI 付黑客松 · 作品介绍（评委版 · 可打印）</div>
   <h1>三维问路 · SceneGuide</h1>
   <div class="tagline">可被 Agent 自动购买的三维场景导览服务 —— 基于支付宝 A2M 智能收（HTTP 402）按量付费</div>
-  <div class="meta">演示地址：<b>http://121.43.80.231/sceneguide/</b> ｜ 代码：随作品交付（git 仓库，MIT）</div>
+  <div class="meta">演示地址：<b>https://121.43.80.231/sceneguide/</b> ｜ 代码开源：<b>https://github.com/1739467001-svg/sceneguide</b>（MIT，含完整提交历史）</div>
 
   <div class="kpis">
     <div class="kpi"><b>76 项</b><span>可自行执行的验收断言</span></div>
@@ -66,7 +66,7 @@
     <li>滚到底部「社区反馈」→ 留言、点赞——反馈按访客去重，墙上只有真实内容</li>
     <li>买一次「十次导览包」→ 打开「我的账户」：额度到账、生成<b>礼品码</b>转赠、申请退款、打印收据——买家视角的完整生命周期</li>
   </ol>
-  <div class="callout">不想相信页面任何描述？一条命令自己验（会真实走一遍支付宝沙箱收银）：<br><code>BASE_URL=http://121.43.80.231/sceneguide bash scripts/verify.sh</code> → 76 项全绿</div>
+  <div class="callout">不想相信页面任何描述？一条命令自己验（会真实走一遍支付宝沙箱收银）：<br><code>BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh</code> → 76 项全绿</div>
 
   <h2><span class="no">03</span>支付集成（Machine Pay · 全链路）</h2>
   <div style="margin:6px 0 14px">
@@ -88,6 +88,7 @@
     <tr><td>单次导览 single</td><td>¥0.50/次</td><td>完整路线 + 计量 + 证据哈希</td></tr>
     <tr><td>十次导览包 pack10</td><td>¥4.50/包</td><td><b>权益额度台账</b>：10 次余额到账，后续调用逐次扣减，耗尽回到 402</td></tr>
     <tr><td>场景任务 quest</td><td>¥9.90/次</td><td>研学任务：线索链 → 顺序打卡（跳站被拒）→ 覆盖实际打卡记录的可核验证书（可打印）</td></tr>
+    <tr><td>首发半价 trial</td><td>¥4.95/次（限时）</td><td>同单次导览——社群首发转化档，同一服务内容独立定价（注册价=实收价约束）</td></tr>
   </table>
   <ul>
     <li><b>自建计量层</b>：官方按量付费不提供自动计量——自建四维计量（调用/token/路径长度/点位数），只记录不参与扣费（平台要求注册价=实收价）</li>
@@ -105,8 +106,9 @@
   <h2><span class="no">06</span>工程亮点（全部实测踩坑）</h2>
   <ul>
     <li><b>Payment-Needed 嵌套结构与扁平签名子集不一致</b>、字典序拼接、<b>alipay-sdk 只吃 PKCS#1</b>——三个官方文档没写清的坑，技术规格文档 §0.5 留档</li>
-    <li>Node ABI 坑两次实锤：better-sqlite3@13 预编译仅覆盖 Node≥22，node:20 容器<b>静默崩溃循环 18 次无报错</b>——换 node:22 解决</li>
-    <li>Service Worker 只在安全上下文注册：IP/HTTP 部署下「可安装 PWA」承诺不成立——按运行环境给诚实安装路径，HTTPS 后自动恢复</li>
+    <li><b>Node 预编译产物坑（实测复盘）</b>：better-sqlite3 v13.0.3 官方 linux-x64 预编译对文件型 DB 必 SIGSEGV（内存库却正常——极易误判为应用 bug）；升级 v13.2.0 修复。部署链路四坑复盘留档于仓库 <code>deploy/服务器部署清单.md</code></li>
+    <li><b>运维自愈</b>：systemd 定时探活 <code>/healthz</code>（含 DB 字段），失败自动重启容器——「维持作品可用」是部署出来的，不是承诺出来的；自愈演练实测通过（停容器 → 15 秒恢复 healthy）</li>
+    <li><b>已启用 HTTPS（Let's Encrypt 为裸 IP 签发的短期证书）</b>：Chrome 会把 http:// 裸 IP 自动升级为 https://，无 TLS 时会硬拦截成空白错误页——现已直接给 121.43.80.231 上 TLS 并配 12 小时自动续期，评委点开链接直达作品；<b>安全上下文成立 → Service Worker 正常注册 →「可安装 PWA」（桌面应用形态）真实可用</b></li>
     <li>隐私最小化：不存任何个人信息，IP 只存加盐哈希</li>
     <li>基线安全响应头（nosniff/SAMEORIGIN/Referrer-Policy/COOP）；无 CDN 依赖可离线运行</li>
   </ul>
@@ -119,7 +121,7 @@
   </ul>
 
   <div class="foot">
-    <span>三维问路 SceneGuide · PAYATHON 2026</span>
+    <span>三维问路 SceneGuide · PAYATHON 2026 ｜ github.com/1739467001-svg/sceneguide</span>
     <span>场景数据 © OpenStreetMap contributors (ODbL) ｜ 代码 MIT ｜ 打印：Ctrl/Cmd+P</span>
   </div>
 

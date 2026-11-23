@@ -46,6 +46,21 @@ demo_pay_with_retry() {
 bold "三维问路 · SceneGuide 验收"
 bold "目标：$BASE"
 
+# ── 前置：目标服务可达性 ──────────────────────────────────────
+# 服务没起时，后面每一项都会报「连接失败」，把真正的问题淹没在几十行噪音里。
+# 这里先做一次探活，不通就直接给出可操作的提示并退出（退出码 2 = 环境问题，非验收失败）。
+if ! "${CURL[@]}" -o /dev/null -w '%{http_code}' "$BASE/healthz" 2>/dev/null | grep -q '^200$'; then
+  printf '\033[31m✗\033[0m 目标服务不可达：%s\n' "$BASE"
+  cat <<'EOF'
+
+  请先启动服务再跑验收：
+    · 本地：cd scene-guide && npm start        （→ http://127.0.0.1:3000）
+    · 线上：BASE_URL=http://121.43.80.231/sceneguide bash scripts/verify.sh
+  若本机开着代理/Clash，curl 可能被劫持；可加 --noproxy '*' 排除。
+EOF
+  exit 2
+fi
+
 # ── 0. 服务可达 ────────────────────────────────────────────
 step "0. 离线协议自检（不依赖沙箱）"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -68,7 +83,9 @@ fi
 step "1. 付费资源返回 402 支付挑战"
 HEADERS=$("${CURL[@]}" -D - -o /dev/null \
   "$BASE/api/v1/guide?scene=zjgsu-xiasha&query=%E4%BB%8E%E5%9B%BE%E4%B9%A6%E9%A6%86%E5%88%B0%E8%A1%8C%E6%94%BF%E6%A5%BC%E6%80%8E%E4%B9%88%E8%B5%B0" 2>&1)
-if grep -q '^HTTP/1.1 402' <<<"$HEADERS"; then ok "状态码 402 Payment Required"; else bad "未返回 402"; fi
+# ⚠️ 不能硬编码 'HTTP/1.1'：走 HTTPS 时 nginx 协商 HTTP/2，首行是 'HTTP/2 402'，
+#    硬编码会把**协议正常**误判成失败（2026-11-23 切 HTTPS 后实测）。
+if grep -qE '^HTTP/[0-9.]+ 402' <<<"$HEADERS"; then ok "状态码 402 Payment Required"; else bad "未返回 402"; fi
 if grep -qi '^Payment-Needed:' <<<"$HEADERS"; then ok "响应头含 Payment-Needed"; else bad "缺少 Payment-Needed 响应头"; fi
 
 PAYLOAD=$(grep -i '^Payment-Needed:' <<<"$HEADERS" | sed 's/^[Pp]ayment-[Nn]eeded: //' | tr -d '\r\n')
@@ -353,7 +370,10 @@ DEEP_CSS=$("${CURL[@]}" "$BASE/deep/path/here" | grep -c 'href="\.\./\.\./styles
 if [[ "$DEEP" == "404" && "$DEEP_CSS" == "1" ]]; then
   ok "深层路径 404 页资源引用为相对路径（../../styles.css，子路径部署不裸奔）"
 else
-  bad "深层 404 页引用异常：HTTP $DEEP，相对引用计数 $DEEP_CSS"
+  # ⚠️ 变量必须用 ${} 包裹：macOS 自带 bash 3.2 的变量名解析不识别多字节字符，
+  #    "$DEEP，" 里中文逗号的字节会被吃进变量名 → 报「DEEP?: unbound variable」，
+  #    后果是**失败分支的报错语句自己崩掉**，掩盖真实失败原因并中断整个验收。
+  bad "深层 404 页引用异常：HTTP ${DEEP:-未取到}，相对引用计数 ${DEEP_CSS:-0}"
 fi
 
 # ── 11. 权益额度台账（多额度商品必须真的交付 N 次）──────────
@@ -403,7 +423,7 @@ REMAIN=""
 for i in 1 2 3; do
   HDR=$("${CURL[@]}" -b "$ECJ" -D - -o /dev/null \
     "$BASE/api/v1/guide?scene=zjgsu-xiasha&query=%E4%BB%8E%E5%9B%BE%E4%B9%A6%E9%A6%86%E5%88%B0%E8%A1%8C%E6%94%BF%E6%A5%BC%E6%80%8E%E4%B9%88%E8%B5%B0" 2>&1)
-  grep -q '^HTTP/1.1 200' <<<"$HDR" || FREE_OK=0
+  grep -qE '^HTTP/[0-9.]+ 200' <<<"$HDR" || FREE_OK=0
   REMAIN=$(grep -i '^X-SG-Entitlement-Remaining:' <<<"$HDR" | tr -d '\r\n' | awk '{print $2}')
 done
 if [[ "$FREE_OK" == "1" && "$REMAIN" == "6" ]]; then
