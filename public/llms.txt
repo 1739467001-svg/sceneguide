@@ -15,7 +15,7 @@
 - 代码仓库（MIT）: https://github.com/1739467001-svg/sceneguide
 - MCP 发现端点: POST https://121.43.80.231/sceneguide/mcp
   （JSON-RPC 2.0；`tools/list` 暴露 `scene_guide`[annotations.paid=true] 与 `scene_guide_scenes`）
-- 验收: `BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh`（79 项，含真实支付）
+- 验收: `BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh`（80 项，含真实支付）
 
 ## 官方条款（据开放平台《AI收》产品介绍 / 接入准备）
 
@@ -75,6 +75,10 @@ Base64URL 作为 `payment_proof` 参数重新调用即可。已购额度的 Agen
 - `POST /api/v1/refunds` : 申请退款（权益即时回收 + 工单留痕 + 订单标注）
 - `GET /api/v1/verify/:out_trade_no` : 订单核验卡（公开可分享：脱敏交易号 + 证据哈希）
 
+官方支付异步通知（AP_NOTIFY_URL / notify_url，供「人自己付款」的官方收银路径回传结果）：
+- `POST /api/v1/pay/notify` : 接收官方支付成功通知，推进订单状态机（幂等 + 金额防篡改；**不发放资源**，交付仍走验付路径）
+- 别名：`POST /api/v1/notify`、`POST /notify`
+
 免费查询：
 - `GET /api/v1/scenes` / `GET /api/v1/scene/:id` : 场景目录与可视化数据
 - `GET /api/v1/orders/:outTradeNo` : 订单状态
@@ -82,6 +86,13 @@ Base64URL 作为 `payment_proof` 参数重新调用即可。已购额度的 Agen
 - `GET /api/v1/stats` / `GET /api/v1/growth` : 计量与渠道漏斗看板
 
 人类买家操作台：`account.html`（订单 / 额度 / 礼品码 / 退款 / 打印收据）。
+
+## 官方支付能力的两族（我们的分工）
+
+| 官方能力族 | 官方工具 / 接口 | 谁在付 | 本作品角色 |
+|---|---|---|---|
+| **AI收**（HTTP 402 · 按量付费） | `Payment-Needed` / `Payment-Proof` / `payment.verify` / `fulfillment.confirm` / `payment.precreate` | 买家的 **Agent** 代付 | **主链路**：Agent 原生的发现→支付→交付，已被官方买方脚本判定通过 |
+| **支付 MCP Server**（网页/手机支付） | `create-web-page-alipay-payment` / `create-mobile-alipay-payment` / `query-alipay-payment` / `refund-alipay-payment` / `query-alipay-refund` | **人**自己扫码或登录 | **互补路径**：本服务提供 `AP_NOTIFY_URL` 异步通知端点接收付款结果（官方要求「支付结果以异步通知或查询接口为准」），含金额防篡改与幂等 |
 
 ## 官方验收（本服务已被支付宝官方买方脚本买通）
 
@@ -96,7 +107,7 @@ bash scripts/official-buyer-check.sh
 ## 验收（不必相信本文件）
 
 ```bash
-BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh   # 79 项：402 全链路 / 幂等 / 额度 / 打卡 / 归因 / 深层 404
+BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh   # 80 项：402 全链路 / 幂等 / 额度 / 打卡 / 归因 / 深层 404
 node scripts/verify-mcp-flow.mjs      # 21 项：Agent 路径 tools/list → 402 → 沙箱收银 → 交付 → 幂等重放
 node scripts/verify-account-flow.mjs  # 17 项：买家路径 买包 → 转赠 → 兑换 → 余额交付 → 撤销 → 退款回收
 ```

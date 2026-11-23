@@ -86,7 +86,7 @@ export function computeQuestScore(quest) {
   return score;
 }
 
-export function createOrderRepository({ file = 'data/orders.db' } = {}) {
+export function createOrderRepository({ file = process.env.SG_ORDERS_DB || 'data/orders.db' } = {}) {
   const dbFile = path.isAbsolute(file) ? file : path.resolve(process.cwd(), file);
   fs.mkdirSync(path.dirname(dbFile), { recursive: true });
 
@@ -504,6 +504,53 @@ export function createOrderRepository({ file = 'data/orders.db' } = {}) {
      */
     markSelfTest(outTradeNo) {
       db.prepare("UPDATE orders SET source = 'demo' WHERE out_trade_no = ?").run(outTradeNo);
+    },
+
+    /**
+     * 官方异步支付通知：把订单标记为已支付（订单状态机 PENDING_PAYMENT → PAID）。
+     *
+     * 为什么要它：官方「支付 MCP Server」与网页/手机支付等官方收银路径，
+     * 都以 **异步通知**（AP_NOTIFY_URL / notify_url）把「用户已付款」告知商家，
+     * 官方文档明确「支付结果必须以异步通知或查询接口返回为准，不能依赖同步跳转」。
+     * 本项目原先只能靠买方携 Payment-Proof 重试来感知付款（402 协议的路径），
+     * 缺一条**不依赖买方 Agent 的官方通知**通道——人自己用支付宝付了钱时尤其需要。
+     *
+     * 安全约定（与本项目一贯的「不轻信外部标识」一致）：
+     *   · 金额必须与本地订单金额**完全一致**才认（防篡改）
+     *   · 幂等：重复通知只生效一次（订单已 PAID 直接返回 ok）
+     *   · 通知**只推进状态机，不发放资源**——资源交付仍由 Payment-Proof 验付路径负责，
+     *     或由带凭证的订单查询结果触发，避免「通知即交付」被伪造通知绕过
+     */
+    async markPaidByNotification(outTradeNo, { tradeNo, amount } = {}) {
+      if (!outTradeNo) return { ok: false, reason: 'NO_OUT_TRADE_NO' };
+      // ⚠️ findByOutTradeNo 是 **async**，必须 await——否则拿到的是 Promise，
+      //    order.orderStatus 恒为 undefined，通知会静默不推进（2026-11-23 实测踩到）。
+      const order = await this.findByOutTradeNo(outTradeNo);
+      if (!order) return { ok: false, reason: 'ORDER_NOT_FOUND' };
+      if (order.orderStatus === 'PAID') {
+        return { ok: true, reason: 'ALREADY_PAID', tradeNo: order.tradeNo ?? tradeNo ?? null };
+      }
+      // 金额必须与本地订单一致（容差 0.01 元）
+      if (amount !== undefined && amount !== null && amount !== '') {
+        const local = Number(order.amount);
+        const notified = Number(amount);
+        if (!Number.isFinite(local) || !Number.isFinite(notified) || Math.abs(local - notified) > 0.001) {
+          return { ok: false, reason: 'AMOUNT_MISMATCH', local, notified };
+        }
+      }
+      const info = db
+        .prepare(
+          `UPDATE orders
+              SET order_status = 'PAID', trade_no = COALESCE(NULLIF(trade_no, ''), ?), updated_at = ?
+            WHERE out_trade_no = ?`,
+        )
+        .run(tradeNo ?? null, now(), outTradeNo);
+      return {
+        ok: true,
+        reason: 'MARKED_PAID',
+        changed: info.changes > 0,
+        tradeNo: tradeNo ?? order.tradeNo ?? null,
+      };
     },
 
     /**

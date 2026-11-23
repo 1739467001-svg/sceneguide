@@ -302,7 +302,7 @@
         <h3 class="panel-title panel-title-sm">一键跑完上面所有验收</h3>
         <p class="panel-note">
           验收脚本随作品一起交付。它会真的发起支付、真的查订单状态、真的解码协议头——
-          右侧输出为 <b>2026-11-20 真实运行捕获</b>（79 项：402 全链路 / 幂等履约 / 额度台账 / 打卡闭环 / 增长归因 / MCP Agent 链路 / 买家账户中心 / 机构采购留资 / 深层 404 / 数据库体检 / 离线协议自检 69 项 / 三维渲染完整性）。
+          右侧输出为 <b>2026-11-20 真实运行捕获</b>（80 项：402 全链路 / 幂等履约 / 额度台账 / 打卡闭环 / 增长归因 / MCP Agent 链路 / 买家账户中心 / 机构采购留资 / 深层 404 / 数据库体检 / 离线协议自检 69 项 / 三维渲染完整性）。
         </p>
         <div class="codeblock">
           <div class="codeblock-head"><span>scripts/verify.sh</span>
@@ -410,7 +410,7 @@
 ▸ 20. 三维渲染完整性（浏览器层）
   ✓ 三维渲染完整性通过（建筑对齐 footprint / demo-park 不黑屏，见 scripts/verify-render.mjs）
 ────────────────────────────────────────────────────────
-全部通过：79 项
+全部通过：80 项
 </code></pre>
         </div>
       </div>
@@ -492,6 +492,46 @@
         <b>为什么接口数只有这些：</b>按量付费官方只要求实现 3 个接口（402 / 验付 / 履约确认），
         而网站支付与 APP 支付要 6 个（下单 / 查询 / 退款 / 退款查询 / 关闭 / 异步通知）。
         这也是本项目选择按量付费赛道的工程理由之一。
+      </div>
+
+      <div class="panel" style="margin-top:14px">
+        <h3 class="panel-title">官方支付能力的两族，以及我们为什么这么分工</h3>
+        <p style="font-size:13px;color:var(--text-dim);margin:0 0 12px">
+          支付宝开放平台当前公开的支付类 MCP 能力分两族。本作品<b>不是只用其中一族</b>，
+          而是按「谁来付、谁来感知」做了分工：
+        </p>
+        <table class="data">
+          <thead>
+            <tr><th style="width:22%">官方能力族</th><th style="width:30%">官方工具 / 接口</th><th style="width:24%">谁在付</th><th>在本作品中的角色</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>AI收</b><br><span class="hint">HTTP 402 · 按量付费</span></td>
+              <td><code>Payment-Needed</code> / <code>Payment-Proof</code> /<br>
+                  <code>payment.verify</code> / <code>fulfillment.confirm</code> /<br>
+                  <code>payment.precreate</code></td>
+              <td>买家的 <b>Agent</b> 代用户付款</td>
+              <td><b>主链路</b>：Agent 原生的「发现→支付→交付」，本作品按此实现并被官方买方脚本判定通过</td>
+            </tr>
+            <tr>
+              <td><b>支付 MCP Server</b><br><span class="hint">网页 / 手机支付</span></td>
+              <td><code>create-web-page-alipay-payment</code> /<br>
+                  <code>create-mobile-alipay-payment</code> /<br>
+                  <code>query-alipay-payment</code> /<br>
+                  <code>refund-alipay-payment</code> /<code>query-alipay-refund</code></td>
+              <td><b>人</b>自己扫码或登录付款</td>
+              <td><b>互补路径</b>：人付款时由官方能力发起与查询；本服务提供
+                  <code>AP_NOTIFY_URL</code> 异步通知端点接收结果（官方要求「支付结果以异步通知或查询接口为准」），
+                  并已实现防篡改与幂等</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="notice notice-blue" style="margin-top:12px">
+          <b>分工的理由：</b>402 协议解决的是「<b>Agent 买 API</b>」——买方是程序，凭证随请求回传，
+          天然可靠；而「<b>人买内容</b>」没有 Payment-Proof 回传路径，
+          必须靠官方的异步通知或查询接口才知道钱到账了。两条路各用其长，
+          而不是自己造一套支付。
+        </div>
       </div>
 
       <div class="notice notice-cyan" style="margin-top:12px">
