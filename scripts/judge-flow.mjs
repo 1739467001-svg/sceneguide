@@ -169,6 +169,25 @@ else bad('未交付（seen=' + JSON.stringify(P.seen) + '）：' + String(P.snip
 if (P.seen && P.seen.validation) ok('页面呈现 Payment-Validation 响应头');
 if (P.seen && P.seen.hash) ok('#result 内含证据哈希 sha256（可复算）');
 
+step('3.5 协议链路面板是否回填为「你刚这一笔」');
+const live = await evalJs(`(() => {
+  const tag = document.querySelector('#traceTag');
+  const term = document.querySelector('#termBody');
+  const note = document.querySelector('.live-trace-note');
+  return JSON.stringify({
+    tag: tag ? tag.textContent.trim() : '',
+    hasTradeNo: /trade_no=\\d{20,}/.test(term ? term.innerText : ''),
+    hasNote: !!note,
+    noteText: note ? note.innerText.replace(/[\\r\\n]+/g, ' ').slice(0, 120) : '',
+  });
+})()`);
+const L2 = typeof live === 'string' ? JSON.parse(live) : live;
+L2.tag.indexOf('你刚完成的这一笔') >= 0
+  ? ok('协议链路面板已切换为「你刚完成的这一笔」（非静态快照）')
+  : bad('协议链路面板仍是静态快照：' + L2.tag);
+L2.hasTradeNo ? ok('终端显示本次真实 trade_no') : bad('终端未显示本次 trade_no');
+L2.hasNote ? ok('已给出 live 提示条（含 Payment-Proof 不回传原文的安全说明）') : bad('缺少 live 提示条');
+
 step('4. 订单核验卡（公开可分享）');
 const verify = await evalJs(`JSON.stringify({
   hasVerifyLink: !!document.querySelector('a[href*="verify"], [data-verify]'),

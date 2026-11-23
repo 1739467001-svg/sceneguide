@@ -35,7 +35,17 @@ function convertKeys(value) {
 
 const nowMs = () => String(Date.now());
 
-/** 从商户订单号尾部取毫秒时间戳（官方脚本同款） */
+/**
+ * 从商户订单号尾部取毫秒时间戳（官方脚本同款）。
+ *
+ * ⚠️ 对本项目的订单号格式**取不到**（2026-11-23 核对）：本项目的 outTradeNo 是
+ *    `SG_<13位毫秒>_<12位随机hex>`，毫秒数在**中间**，尾部是 hex——
+ *    而正则是 `(\d{10,})$`（要求结尾是 10 位以上连续数字），hex 尾巴
+ *    'e12a90266053' 只有 8 位连续数字，永不命中，于是每次都走 nowMs() 兜底。
+ *    行为上无害（订单刚创建，now 就是它的创建时间），但别再以为这里真的
+ *    「取到了订单里的时间戳」——注释与实现不符比没有注释更糟。
+ *    若将来订单号改成「时间戳结尾」的格式，这个函数会自动开始生效。
+ */
 function timestampFromOutTradeNo(outTradeNo) {
   const match = /(\d{10,})$/.exec(String(outTradeNo ?? ''));
   return match ? match[1] : nowMs();
@@ -163,6 +173,30 @@ export function createDemoPayer({ config }) {
       payUrl: cashierBody.payScheme
         ? `https://render.alipay.com/p/yuyan/180020010001290755/pay.html?schema=${encodeURIComponent(cashierBody.payScheme)}`
         : null,
+      // ── 本次交易的报文素材（供前端把「协议链路」面板从静态快照换成这一笔的真实报文）──
+      //    ⚠️ Payment-Proof 属买方凭证，**只回传长度与指纹**，绝不回传原文。
+      liveTrace: {
+        paymentNeededBase64Length: paymentNeededBase64?.length ?? 0,
+        paymentNeededHeaderName: 'Payment-Needed',
+        paymentProofLength: proofHeader?.length ?? 0,
+        paymentProofFingerprint: crypto
+          .createHash('sha256')
+          .update(String(proofHeader ?? ''))
+          .digest('hex')
+          .slice(0, 16),
+        clientSessionLength: clientSession?.length ?? 0,
+        paymentValidationLength: paymentValidation?.length ?? 0,
+        paymentValidationPreview: paymentValidation
+          ? `${paymentValidation.slice(0, 72)}…（共 ${paymentValidation.length} 字符）`
+          : null,
+        cashierTradeNo: tradeNo,
+        outTradeNo: protocol.outTradeNo ?? null,
+        amount: protocol.amount ?? null,
+        goodsName: method.goodsName ?? null,
+        serviceId: method.serviceId ?? null,
+        sellerId: method.sellerId ?? null,
+        payScheme: cashierBody.payScheme ? String(cashierBody.payScheme).slice(0, 120) : null,
+      },
     };
   }
 

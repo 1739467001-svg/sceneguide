@@ -204,6 +204,7 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
       //
       // ⚠️ 必须优雅降级：预下单失败**绝不能**让 402 挑战发不出去——
       //    本地签名的 Payment-Needed 始终是兜底（它不依赖任何 OpenAPI 调用）。
+      let amtPrePayId = null;
       if (config.env === 'production' && config.precreate?.enabled) {
         try {
           const pre = await alipayClient.precreate({
@@ -216,6 +217,7 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
             memo: `三维问路 · ${tier.label}`,
           });
           if (pre.ok) {
+            amtPrePayId = pre.amtPrePayId;
             res.set('amtPaymentLink', pre.amtPrePayId);
             res.set('X-SG-Precreate', 'ok');
             console.log(`[402] 预下单成功 out_trade_no=${outTradeNo} amt_pre_pay_id=${pre.amtPrePayId}`);
@@ -236,6 +238,8 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
         amount,
         currency: 'CNY',
         goods_name: goodsName,
+        // 官方预下单号（形态 B 开启时才有）：前端可据此给人一个付款入口
+        ...(amtPrePayId ? { amt_pre_pay_id: amtPrePayId } : {}),
       });
     } catch (error) {
       console.error('[402] 创建支付订单失败:', error.message);
@@ -627,6 +631,7 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
       const headers = { 'x-sg-ignore-entitlement': '1', ...(visitorCookie ? { Cookie: visitorCookie } : {}) };
       const challengeRes = await fetch(resourceUrl, { headers, signal: AbortSignal.timeout(15000) });
       const paymentNeeded = challengeRes.headers.get('payment-needed');
+      const amtPaymentLink = challengeRes.headers.get('amtpaymentlink');
       const body = await challengeRes.clone().json().catch(() => ({}));
       if (paymentNeeded) {
         // 订单已在 402 分支落库并归因，这里只补一次来源标记
@@ -635,6 +640,8 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
       return res.status(409).json({
         error: '生产环境不代付真实资金',
         code: 'PRODUCTION_PAYMENT_REQUIRED',
+        // 官方预下单号（形态 B 开启时才有）——前端据此给人一个付款入口
+        ...(amtPaymentLink ? { amt_payment_link: amtPaymentLink } : {}),
         message:
           '生产环境下本服务不代替你付款。请用支付宝 AI 付能力完成本次支付：'
           + '把 402 响应中的 Payment-Needed 报文交给 alipay-pay-for-402-service 技能，'
@@ -719,6 +726,8 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
         paymentValidationPreview: result.paymentValidationPreview,
         tradeNo: result.tradeNo,
         payUrl: result.payUrl,
+        // 本次真实交易的报文素材（前端用它把协议链路面板换成「你刚这一笔」的报文）
+        liveTrace: result.liveTrace ?? null,
       });
     } catch (err) {
       return res.status(500).json({ error: err.message });

@@ -859,12 +859,84 @@ ${esc(JSON.stringify(envelope, null, 2))}</code></pre>
     },
   ];
 
+
+  /**
+   * 把「刚刚这一笔」的真实报文构造为与静态快照同构的 trace，
+   * 于是协议链路面板可以从**静态快照**切换成**评委自己刚完成的这一笔**。
+   *
+   * 为什么值得做：静态报文证明「我们做过」，而评委亲眼看到自己那一笔的
+   * trade_no / Payment-Validation 出现在面板里，证明的是「现在还能跑」。
+   * 前者是文档，后者是证据。
+   *
+   * ⚠️ Payment-Proof 是买方凭证——**只展示长度与指纹**，绝不展示原文。
+   */
+  function buildLiveTrace(live, extra = {}) {
+    const base = state.trace ?? {};
+    const now = new Date().toISOString();
+    return {
+      ...base,
+      capturedAt: now,
+      env: 'sandbox',
+      isLive: true,
+      liveCapturedAt: now,
+      request: base.request ?? { method: 'GET', url: 'api/v1/guide?scene=…&query=…' },
+      step1_challenge: {
+        ...(base.step1_challenge ?? {}),
+        status: 402,
+        statusText: 'Payment Required',
+        headerName: 'Payment-Needed',
+        headerValuePreview: `${live.paymentNeededBase64Length} 字符（Base64URL 账单）`,
+        body: {
+          code: 'Payment-Needed',
+          message: '需要支付',
+          out_trade_no: live.outTradeNo ?? '—',
+          amount: live.amount ?? '—',
+          currency: 'CNY',
+          goods_name: live.goodsName ?? '—',
+        },
+      },
+      step2_payment: {
+        ...(base.step2_payment ?? {}),
+        note: '沙箱收银由服务端代付买方动作（真实调用支付宝沙箱收银接口）',
+      },
+      step3_verify: {
+        ...(base.step3_verify ?? {}),
+        bizContent: {
+          payment_proof: `［买方凭证 · ${live.paymentProofLength} 字符 · sha256:${live.paymentProofFingerprint}…］`,
+          trade_no: live.cashierTradeNo ?? '—',
+          client_session: `［买方会话 · ${live.clientSessionLength} 字符 · 原样透传］`,
+        },
+      },
+      step5_delivery: {
+        ...(base.step5_delivery ?? {}),
+        status: 200,
+        headerName: 'Payment-Validation',
+        headerValuePreview: live.paymentValidationPreview ?? '—',
+        body: {
+          ...(base.step5_delivery?.body ?? {}),
+          resource_id: extra.resource_id ?? base.step5_delivery?.body?.resource_id ?? '—',
+          trade_no: live.cashierTradeNo ?? '—',
+          out_trade_no: live.outTradeNo ?? '—',
+          fulfillment_confirmed: true,
+        },
+      },
+      order: {
+        ...(base.order ?? {}),
+        tradeNo: live.cashierTradeNo ?? '',
+        payUrl: extra.payUrl ?? '',
+      },
+    };
+  }
+
   function renderTrace(trace) {
     state.trace = trace;
     const tag = $('#traceTag');
     if (tag) {
-      tag.textContent = `沙箱实测 · ${trace.capturedAt.slice(0, 10)}`;
-      tag.className = 'tag cyan';
+      // live 标记 = 这是评委自己刚完成的那一笔，不是静态快照
+      tag.textContent = trace.isLive
+        ? `你刚完成的这一笔 · ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`
+        : `沙箱实测 · ${trace.capturedAt.slice(0, 10)}`;
+      tag.className = trace.isLive ? 'tag amber' : 'tag cyan';
     }
 
     // 左列只放「步骤目录」，报文统一在右列展示，避免同一份内容出现两遍
@@ -1561,6 +1633,35 @@ ${JSON.stringify(
       renderAnswer(j.content, { tradeNo: j.tradeNo, envelope: j.envelope, entitlement: j.envelope?.entitlement });
       refreshStats();
       refreshEntitlements();
+
+      // 把「刚这一笔」的真实报文回填到协议链路面板：
+      // 评委付完钱后，往上滚就能看到**自己这一笔**的 trade_no / Payment-Validation，
+      // 而不是一份与己无关的静态快照。
+      if (j.liveTrace) {
+        try {
+          renderTrace(buildLiveTrace(j.liveTrace, {
+            resource_id: j.envelope?.resource_id ?? j.content?.resource_id,
+            payUrl: j.payUrl,
+          }));
+          const live = document.querySelector('#protocol');
+          if (live) {
+            live.classList.add('has-live-trace');
+            const note = document.querySelector('#protocol .live-trace-note');
+            if (note) note.remove();
+            const banner = document.createElement('div');
+            banner.className = 'notice notice-amber live-trace-note';
+            banner.style.margin = '14px 0 0';
+            banner.innerHTML = '上方协议链路已切换为<b>你刚完成的这一笔</b>的真实报文'
+              + '（trade_no <code>' + esc(j.liveTrace.cashierTradeNo ?? '') + '</code>'
+              + '，Payment-Validation ' + esc(j.liveTrace.paymentValidationLength ?? 0) + ' 字符）。'
+              + '买方凭证 Payment-Proof 按安全约定只展示长度与指纹，原文不回传。';
+            const anchor = live.querySelector('.grid.proto-grid');
+            if (anchor) anchor.after(banner);
+          }
+        } catch (err) {
+          console.warn('回填 live trace 失败', err);
+        }
+      }
     } catch (err) {
       setError(err.message, '支付请求失败。');
     }
