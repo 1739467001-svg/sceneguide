@@ -18,7 +18,7 @@
  *   node scripts/verify-mcp-flow.mjs                  # 默认打本地 3000
  *   BASE_URL=http://121.43.80.231/sceneguide node scripts/verify-mcp-flow.mjs
  *
- * 依赖仓库根的 .alipay-sandbox.json（买家账号），
+ * 依赖沙箱配置 scene-guide/.alipay-sandbox.json（买家账号），
  * 与 scripts/verify.sh 的支付步骤同一口径；正式环境（production）跳过支付段。
  */
 

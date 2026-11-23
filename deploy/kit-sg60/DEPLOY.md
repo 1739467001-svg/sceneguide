@@ -1,6 +1,6 @@
 # 三维问路 SceneGuide · Compose 部署手册（现网在 aliyun）
 
-> 访问地址：http://121.43.80.231/sceneguide/ （暂无域名，IP 直连）
+> 访问地址：https://121.43.80.231/sceneguide/ （暂无域名，IP 直连）
 > 本手册最初写给 60.205.204.162（sg60）；该机已不可达，同一套 kit 平移到 **aliyun（121.43.80.231）**
 > 继续当生产用——命令里的 `TARGET=sg60` 请相应改成 `TARGET=aliyun`。
 > 布局遵循 /srv/DEPLOYMENT.md；本文件是项目级操作手册。

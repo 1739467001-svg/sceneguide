@@ -6,13 +6,13 @@
  * 每个渠道一张 PNG，指向 http://<部署地址>/?ref=<渠道码>。
  *
  * 用法：node scripts/make-qr.mjs [BASE_URL]
- *   BASE_URL 默认 http://121.43.80.231/sceneguide
+ *   BASE_URL 默认 https://121.43.80.231/sceneguide
  */
 import QRCode from 'qrcode';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const BASE = process.argv[2] ?? process.env.BASE_URL ?? 'http://121.43.80.231/sceneguide';
+const BASE = process.argv[2] ?? process.env.BASE_URL ?? 'https://121.43.80.231/sceneguide';
 const OUT = path.resolve('提交材料/渠道二维码');
 fs.mkdirSync(OUT, { recursive: true });
 

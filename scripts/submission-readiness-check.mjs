@@ -160,9 +160,17 @@ if (!repoMatch) bad('提交文案里没有仓库链接');
 else {
   const url = repoMatch[0];
   try {
-    const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(20000) });
+    // 超时放宽到 60s：这台机器到 github.com 实测要 40s+ 才拉完（HTTP 200），
+    // 20s 会把「网络慢」误判成「链接坏」——那会让闸门在唯一该拦的地方拦错东西。
+    const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(60000) });
     r.ok ? ok(`仓库可访问：${url}`) : bad(`仓库返回 ${r.status}：${url}`);
-  } catch (e) { bad(`仓库不可达：${e.message}`); }
+  } catch (e) {
+    // 区分两种失败：连接失败/DNS 错误 = 真断链；超时 = 本机网络慢，没验成
+    const timedOut = /timeout|aborted/i.test(e.message);
+    timedOut
+      ? warn(`仓库链接本轮没验成（${e.message}）——判为网络慢，不是断链；提交前请在浏览器里手动点开确认`)
+      : bad(`仓库不可达：${e.message}`);
+  }
 }
 
 step('⑤ 提交实物');
@@ -199,24 +207,85 @@ else {
   // 打包时机检查：zip 是否比它包含的源文件旧
   // 自己读 zip 的 central directory：unzip -Z1 在 macOS 下中文名会乱码（UTF-8 flag 未置）
   const entries = listZipEntries(fs.readFileSync(zPath));
-  const need = ['作品介绍文档.pdf', '验收说明.txt', '说明.txt'];
-  for (const n of need) {
-    entries.some((e) => e.name.includes(n))
-      ? ok(`附件包含 ${n}`)
-      : bad(`附件缺少 ${n}`);
+  // 清单来自 config/review-package.json —— 与打包脚本共用同一份，不会漂移
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config', 'review-package.json'), 'utf8'));
+  for (const f of pkg.files) {
+    entries.some((e) => e.name === f.name)
+      ? ok(`附件包含 ${f.zh}（${f.name}）`)
+      : bad(`附件缺少 ${f.zh}（${f.name}）`);
   }
+  entries.some((e) => e.name === (pkg.readme ?? 'README.txt'))
+    ? ok('附件包含包内说明 README（中文名 ↔ 英文名对照表）')
+    : bad('附件缺少包内说明 README');
+  // 包内条目名不得含非 ASCII 字符——否则就把编码风险又放回去了
+  const nonAscii = entries.filter((e) => /[^\x20-\x7e]/.test(e.name)).map((e) => e.name);
+  nonAscii.length === 0
+    ? ok('附件包内所有文件名均为 ASCII（任何解压工具都不会乱码）')
+    : bad(`附件包内有非 ASCII 文件名（可能被解码成乱码）：${nonAscii.join(' / ')}`);
   // 打包时机：包内每个条目都不应早于它的源文件（否则提交的是旧内容）
-  const srcOf = (name) => path.join(MAT, name);
+  // ⚠️ 必须按 config/review-package.json 的 name→src 映射回查：
+  //   包内名是 ASCII（work-description.pdf），直接拿包内名去 MAT 里找源文件找不到，
+  //   这条检查会被整体跳过——曾经就是这样静默失效的（形同虚设）。
+  const srcOf = new Map((pkg.files ?? []).map((f) => [f.name, path.join(MAT, f.src)]));
   let stale = 0;
+  let checked = 0;
   for (const e of entries) {
-    const src = srcOf(e.name);
-    if (!fs.existsSync(src)) continue;
+    const src = srcOf.get(e.name);
+    if (!src || !fs.existsSync(src)) continue;
+    checked += 1;
     if (e.mtime.getTime() + 60000 < fs.statSync(src).mtime.getTime()) {
       bad(`附件包里的 ${e.name} 比源文件旧——需要重新打包`);
       stale += 1;
     }
   }
-  if (stale === 0) ok('附件包内每个文件都不早于其源文件（打包时机正确）');
+  if (checked === 0) {
+    bad('打包时机检查一条都没跑起来（包内名到源文件的映射对不上）');
+  } else if (stale === 0) {
+    ok(`附件包内 ${checked} 个文件都不早于其源文件（打包时机正确）`);
+  }
+}
+
+step('⑤b 作品图标 / 封面图（表单上传位）');
+/**
+ * 读 PNG 头拿到真实像素尺寸。
+ * 用真实尺寸判定，而不是信文件名——文件名叫「方形960」但实际不是方形，
+ * 到了表单里会被裁掉一角，这是提交后才看得见的坑。
+ */
+function pngSize(buf) {
+  if (buf.length < 24 || buf.readUInt32BE(0) !== 0x89504e47) return null;
+  if (buf.toString('latin1', 12, 16) !== 'IHDR') return null;
+  return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+}
+const MAX_UPLOAD = 20 * 1024 * 1024; // 官方表单：作品图片 ≤20MB
+const images = [
+  { file: '作品图标-方形960.png', label: '作品图标', ratio: 1, minW: 900 },
+  { file: '作品封面-16x9.png', label: '作品封面', ratio: 16 / 9, minW: 1600 },
+];
+for (const img of images) {
+  const p = path.join(MAT, img.file);
+  if (!fs.existsSync(p)) { bad(`缺少 ${img.label}：${img.file}`); continue; }
+  const buf = fs.readFileSync(p);
+  const size = pngSize(buf);
+  if (!size) { bad(`${img.file} 不是有效 PNG（表头损坏）`); continue; }
+  const bytes = buf.length;
+  if (bytes > MAX_UPLOAD) { bad(`${img.file} 超过 ${MAX_UPLOAD / 1048576}MB 上限（${(bytes / 1048576).toFixed(1)}MB）`); continue; }
+  const actual = size.width / size.height;
+  if (Math.abs(actual - img.ratio) > 0.02) {
+    bad(`${img.file} 比例 ${actual.toFixed(3)} 偏离目标 ${img.ratio.toFixed(3)}（${size.width}×${size.height}）`);
+    continue;
+  }
+  if (size.width < img.minW) { bad(`${img.file} 宽度 ${size.width} < ${img.minW}（高清屏上会发虚）`); continue; }
+  ok(`${img.label} ${img.file}：${size.width}×${size.height}，${(bytes / 1048576).toFixed(2)}MB，比例与体积均合规`);
+}
+// 封面主文件与轻量版不得内容相同（否则「上传时选错版本」会看不出来）
+{
+  const a = path.join(MAT, '作品封面-16x9.png');
+  const b = path.join(MAT, '作品封面-16x9-1200.png');
+  if (fs.existsSync(a) && fs.existsSync(b)) {
+    fs.readFileSync(a).equals(fs.readFileSync(b))
+      ? bad('封面主文件与 1200 轻量版内容相同——轻量版应是降采样的缩图')
+      : ok('封面主文件与 1200 轻量版内容不同（轻量版确为降采样）');
+  }
 }
 
 step('⑥ 收款方支付宝账号与报名资料一致');

@@ -9,6 +9,11 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "smoke": "node scripts/smoke.js",
+    "test": "node scripts/smoke.js && node scripts/test-deep.js && node scripts/test-deep2.js && node scripts/test-http.js",
+    "test:smoke": "node scripts/smoke.js",
+    "test:deep": "node scripts/test-deep.js",
+    "test:deep2": "node scripts/test-deep2.js",
+    "test:http": "node scripts/test-http.js",
     "verify": "bash scripts/verify.sh",
     "icons": "node scripts/make-icons.mjs",
     "trace": "node scripts/capture-protocol-trace.js && node scripts/capture-api-reference.js"

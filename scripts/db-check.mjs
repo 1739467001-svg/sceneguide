@@ -38,29 +38,44 @@ for (const target of TARGETS) {
     continue;
   }
   try {
-    const quick = db.pragma('quick_check', { simple: true });
-    if (quick === 'ok') {
-      console.log(`  ${GREEN}✓ quick_check: ok${RESET}`);
-    } else {
-      console.log(`  ${RED}✗ quick_check: ${quick}${RESET}`);
+    // 🔴 quick_check 对「文件头就不对」的库是**抛异常**而不是返回描述
+    //    （实测：SqliteError: file is not a database）。这个脚本存在的唯一目的
+    //    就是发现这种库，所以必须自己接住——旧实现只有 try/finally 没有 catch，
+    //    一崩就连 analytics 也不检查了、汇总和恢复步骤全不打印，运维拿到一坨
+    //    栈而不是可执行结论（2026-11-23 实测复现）。
+    let quick;
+    try {
+      quick = db.pragma('quick_check', { simple: true });
+    } catch (err) {
+      // 读不了 pragma（文件不是数据库 / IO 错误）＝按损坏计，后面概览也一并跳过
+      console.log(`  ${RED}✗ quick_check 失败：${err.message}${RESET}`);
       bad += 1;
+      quick = null;
     }
-    // 行数概览（顺带验证每张表都读得出来）
-    const tables = db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
-      .all()
-      .map((r) => r.name);
-    for (const t of tables) {
-      try {
-        const n = db.prepare(`SELECT COUNT(*) AS c FROM "${t}"`).get().c;
-        console.log(`    ${t}: ${n} 行`);
-      } catch (err) {
-        console.log(`    ${RED}${t}: 读失败（${err.message}）${RESET}`);
+    if (quick !== null) {
+      if (quick === 'ok') {
+        console.log(`  ${GREEN}✓ quick_check: ok${RESET}`);
+      } else {
+        console.log(`  ${RED}✗ quick_check: ${quick}${RESET}`);
         bad += 1;
       }
+      // 行数概览（顺带验证每张表都读得出来）
+      const tables = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        .all()
+        .map((r) => r.name);
+      for (const t of tables) {
+        try {
+          const n = db.prepare(`SELECT COUNT(*) AS c FROM "${t}"`).get().c;
+          console.log(`    ${t}: ${n} 行`);
+        } catch (err) {
+          console.log(`    ${RED}${t}: 读失败（${err.message}）${RESET}`);
+          bad += 1;
+        }
+      }
+      const wal = db.pragma('journal_mode', { simple: true });
+      console.log(`    journal_mode: ${wal}`);
     }
-    const wal = db.pragma('journal_mode', { simple: true });
-    console.log(`    journal_mode: ${wal}`);
   } finally {
     db.close();
   }

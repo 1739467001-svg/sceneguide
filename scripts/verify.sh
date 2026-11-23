@@ -627,6 +627,106 @@ else
   warn "未检测到本机 Chrome，跳过冷评委路径（本项需要浏览器层）"
 fi
 
+# ── 18.6 官方买方脚本验收（最硬的一项）──────────────────────
+# 这一项**不用我们自己的实现**去买我们自己的服务，而是调用**支付宝官方写的**
+# 买方脚本 local_402_sandbox_pay.py，让它按官方协议完整走一遍：
+#   402 → 官方沙箱收银 → Payment-Proof → 200 + Payment-Validation → 官方自校验交付证据
+# 结论由官方脚本自己给出（「AI 按量付费沙箱服务端联调通过」）——
+# 也就是：我们的服务被主办方官方工具端到端买通了。
+step "18.6 官方买方脚本验收（支付宝官方脚本买通本服务）"
+if bash "$SCRIPT_DIR/official-buyer-check.sh" > /tmp/sg-official-buyer.log 2>&1; then
+  ok "支付宝官方买方脚本端到端买通本服务（官方脚本自判定「AI 按量付费沙箱服务端联调通过」）"
+  grep -E 'trade_no|商户订单号' /tmp/sg-official-buyer.log | sed 's/^ *✓ */      /'
+elif [[ $? -eq 3 || $? -eq 3 ]]; then
+  warn "环境不具备（官方 Skill 或沙箱配置缺失），跳过本项"
+else
+  bad "官方买方脚本未通过"
+  tail -10 /tmp/sg-official-buyer.log | sed 's/^/      /'
+fi
+
+# ── 18.7 生产模式支付契约（离线验，不用真密钥）───────────────
+# 生产模式与服务端 demo/pay 的契约（409 + PRODUCTION_PAYMENT_REQUIRED + 指引字段）
+# 与沙箱完全不同。前端若按沙箱逻辑处理，评委点支付会看到自相矛盾的提示。
+# 这里用一把**运行时生成的临时 RSA 密钥**起一个本地生产实例，把契约逐字段验一遍。
+step "18.7 生产模式支付契约（本地生产实例，离线）"
+if node "$SCRIPT_DIR/prod-pay-ux-check.mjs" > /tmp/sg-prod-ux.log 2>&1; then
+  PU_N=$(grep -c '✓' /tmp/sg-prod-ux.log || true)
+  ok "生产模式支付契约通过（${PU_N} 项：402 挑战 + 409 契约 + 前端渲染字段 + meta.env）"
+else
+  bad "生产模式支付契约存在失败项"
+  tail -12 /tmp/sg-prod-ux.log | sed 's/^/      /'
+fi
+
+# ── 18.8 官方支付异步通知（AP_NOTIFY_URL / notify_url）───────
+# 官方《支付 MCP Server》的 AP_NOTIFY_URL 由**商家自己提供**——也就是本服务提供。
+# 官方要求「支付结果以异步通知或查询接口为准，不能依赖同步跳转」。
+# 本项验证：合法通知推进状态机 / 重复通知幂等 / 金额篡改被拒 / 非成功状态不推进 /
+#           **通知不发放资源**（伪造通知拿不到内容）。
+step "18.8 官方支付异步通知（notify_url 通道）"
+if node "$SCRIPT_DIR/notify-check.mjs" > /tmp/sg-notify.log 2>&1; then
+  NC_N=$(grep -c '✓' /tmp/sg-notify.log || true)
+  ok "官方异步通知通道通过（${NC_N} 项：推进/幂等/防篡改/状态判定/不越权交付）"
+else
+  bad "官方异步通知通道存在失败项"
+  tail -12 /tmp/sg-notify.log | sed 's/^/      /'
+fi
+
+# ── 18.9 协议层单元自检（纯函数，不依赖网络）─────────────────
+# 覆盖最容易在重构中被改坏、又最难靠端到端发现的协议细节：
+#   履约回执幂等成功识别 / 官方 8 字段签名集 / Base64URL 形态。
+# 2026-11-23 由本节抓出「空白值未按官方 Java trim 跳过」的签名不一致 bug。
+step "18.9 协议层单元自检"
+if node "$SCRIPT_DIR/protocol-unit-check.mjs" > /tmp/sg-protocol-unit.log 2>&1; then
+  PU_N=$(grep -c '✓' /tmp/sg-protocol-unit.log || true)
+  ok "协议层单元自检通过（${PU_N} 项：回执幂等识别 / 官方 8 字段签名集 / Base64URL 形态）"
+else
+  bad "协议层单元自检存在失败项"
+  tail -10 /tmp/sg-protocol-unit.log | sed 's/^/      /'
+fi
+
+# ── 18.10 付费资源 HTTPS 硬约束（官方工具级）──────────────────
+# 官方买方 CLI 对付费资源 URL 有硬性校验：
+#   Error: paid resource URL must use HTTPS
+# ⇒ 提交给评委的演示地址若是 http://，评委用官方工具买我们的服务会**直接失败**。
+# 本项：线上 https 入口产出官方可吃的 402 账单（14 个必需字段齐全）
+#       + 静态审计提交物料里没有裸 http 的演示地址。
+step "18.10 付费资源 HTTPS 硬约束"
+if node "$SCRIPT_DIR/https-hard-constraint-check.mjs" > /tmp/sg-https-hard.log 2>&1; then
+  HS_N=$(grep -c '✓' /tmp/sg-https-hard.log || true)
+  ok "HTTPS 硬约束通过（${HS_N} 项：官方可吃的 402 账单 + 物料地址审计）"
+else
+  bad "HTTPS 硬约束存在失败项（评委用官方工具买会失败）"
+  tail -10 /tmp/sg-https-hard.log | sed 's/^/      /'
+fi
+
+# ── 18.11 提交就绪闸门（提交前的最后一道关）─────────────────
+# 提交表单是整个比赛唯一不可逆的产物：填错一个价格、死一个链接、超一个字数，
+# 评委看到的就是「不严谨」，而没有第二次机会。本项机械核对：
+#   表单字段与字数上限 / 四档价格与 services.json 逐一相符 / 演示地址与仓库可访问 /
+#   介绍 PDF 与演示视频可用 / **附件包内每个文件都不早于其源文件**（打包时机）/ 收款方账号一致
+# ⚠️ 它会报「AI 付接入凭证仍待填」——那正是签约后的最后一步，属预期提醒。
+step "18.11 提交就绪闸门"
+if node "$SCRIPT_DIR/submission-readiness-check.mjs" > /tmp/sg-submission-ready.log 2>&1; then
+  SR_N=$(grep -c '✓' /tmp/sg-submission-ready.log || true)
+  ok "提交就绪检查通过（${SR_N} 项：字段字数/价格一致/地址可用/实物完整/附件包时机/账号一致）"
+  grep '!' /tmp/sg-submission-ready.log | sed 's/^ *//;s/^/      /' || true
+else
+  bad "提交就绪检查存在未通过项——先别点提交"
+  grep -E '✗' /tmp/sg-submission-ready.log | sed 's/^/      /'
+fi
+
+# ── 18.12 评委指引 7 步对得上（UI 改版防失效）─────────────
+# 提交表单的「如何获取作品」写了评委 3 分钟体验路径的 7 步。
+# 那是指引**承诺的入口**——若 UI 改版后某个按钮/区块消失，评委就会在第 3 步卡住。
+# 本项用无头浏览器逐条核对指引里提到的每个入口是否真的存在。
+step "18.12 评委指引 7 步入口核对"
+if node "$SCRIPT_DIR/judge-path-check.mjs" > /tmp/sg-judge-path.log 2>&1; then
+  ok "评委指引 7 步入口全部对得上（首屏终端/查询/试看/支付/核验卡/账户/场景切换）"
+else
+  bad "评委指引与实际入口对不上——评委会在中途卡住"
+  grep '✗' /tmp/sg-judge-path.log | sed 's/^/      /'
+fi
+
 # ── 19. 数据库体检（损坏必须早发现：支付链路会静默变 500）─────────
 step "19. 数据库体检"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

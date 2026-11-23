@@ -4,12 +4,13 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import compression from 'compression';
-import { resolveConfig, resolveSellerId, loadServices } from './config.js';
+import { resolveConfig, resolveSellerId, loadServices, ROOT } from './config.js';
 import { createAlipayClient } from './a2m/client.js';
 import { createOrderRepository } from './orders/repository.js';
 import { createGuideRouter } from './routes/guide.js';
 import { createFeedbackRouter } from './routes/feedback.js';
 import { createAccountRouter } from './routes/account.js';
+import { createNotifyRouter } from './routes/notify.js';
 import { createDemoPayer } from './demo/pay.js';
 import { createAnalyticsStore } from './analytics/store.js';
 
@@ -26,7 +27,7 @@ export function createApp({ config, services, sellerId, repository, alipayClient
   //    （nginx 的 $proxy_add_x_forwarded_for 追加上去的真实客户端）。
   //    本地直连（无代理头）时 Express 自动回落 socket 地址，行为不变。
   app.set('trust proxy', 1);
-  // gzip：three.js 模块约 2MB，压缩后线上传输约 500KB——评委手机打开的体验差距就在这
+  // gzip：three.core.js 实测 1.41MB，gzip 后线上 285KB（缩减 80%）——评委手机打开的体验差距就在这
   app.use(compression({ threshold: 1024 }));
   app.use(express.json());
 
@@ -123,6 +124,11 @@ export function createApp({ config, services, sellerId, repository, alipayClient
   /* 买家账户中心：我的订单 / 权益额度 / 礼品码 / 售后 */
   app.use(createAccountRouter({ repository, analytics }));
 
+  /* 官方支付异步通知（AP_NOTIFY_URL / notify_url）——
+     官方《支付 MCP Server》与网页/手机收银都靠它把「用户已付款」告知商家，
+     官方要求「支付结果以异步通知或查询接口为准，不能依赖同步跳转」。 */
+  app.use(createNotifyRouter({ repository, config }));
+
   /* ── 社区反馈墙：点赞 / 评论 / 举报 ── */
   app.use(createFeedbackRouter({ analytics }));
 
@@ -168,8 +174,13 @@ export function createApp({ config, services, sellerId, repository, alipayClient
   // 这个站的 JS 就是作品本体（402 协议、三维场景、实时支付都在里面跑），
   // 所以用 no-cache：浏览器每次都带 ETag 协商（命中就是 304，很便宜），
   // 但永远不会拿到过期版本 —— 改一行代码刷新即生效。
-  // 版本号统一在这里改，index.html 与 app.js 里的引用必须一致
-  const ASSET_VERSION = process.env.ASSET_VERSION ?? '20261107-live4';
+  //
+  // 🔴 资产版本号改哪里（2026-11-23 修正）：在 public/index.html 的
+  //    `app.js?v=…` / `styles.css?v=…` 查询参数上改。这里**曾经**有一个
+  //    `const ASSET_VERSION = process.env.ASSET_VERSION ?? '…'`，但声明之后
+  //    从未被使用——而注释还写着「版本号统一在这里改」。照做的人改完会发现
+  //    毫无效果（真正的缓存破除在 index.html，且上面的 no-cache 已经兜底）。
+  //    死变量 + 误导性注释一并清掉。
 
   app.use(
     express.static(PUBLIC_DIR, {
@@ -216,13 +227,27 @@ function bootstrap() {
   const config = resolveConfig();
   const services = loadServices({ env: config.env });
   const sellerId = resolveSellerId();
-  const repository = createOrderRepository({ file: process.env.ORDER_DB ?? 'data/orders.db' });
+  // 数据库默认路径同样按 ROOT 解析（与上面的 invites 同一条理由）：
+  // 所有已记录的部署方式（Docker WORKDIR=/app、退役的 systemd 单元
+  // WorkingDirectory=<scene-guide>、deploy.sh 里的 cd <scene-guide>）cwd 都等于 ROOT，
+  // 因此这里与旧的 cwd 相对写法**解析结果完全相同**，只是不再有
+  // 「换个目录启动就连到一个崭新的空库、还不报错」的脚坑。
+  const repository = createOrderRepository({ file: process.env.ORDER_DB ?? path.resolve(ROOT, 'data', 'orders.db') });
   const alipayClient = createAlipayClient(config);
   const demoPayer = createDemoPayer({ config });
-  const analytics = createAnalyticsStore({ file: process.env.ANALYTICS_DB ?? 'data/analytics.db' });
+  const analytics = createAnalyticsStore({
+    file: process.env.ANALYTICS_DB ?? path.resolve(ROOT, 'data', 'analytics.db'),
+  });
 
   // 种子渠道：config/invites.json 由 scripts/make-invites.mjs 生成
-  const invitesFile = path.resolve('config/invites.json');
+  // 🔴 按 ROOT 解析，不按进程 cwd（2026-11-23 修正）：
+  //    旧实现写 path.resolve('config/invites.json')——cwd 相对。容器里 WORKDIR
+  //    恰好是 /app 所以看不出问题，但一旦从别的目录启动（systemd 的
+  //    WorkingDirectory=/、从仓库根跑 node scene-guide/src/server.js、验收脚本），
+  //    文件找不到时 existsSync 静默返回 false：不报错、不打日志，结果是全部
+  //    /r/<code> 短链 404、渠道看板丢种子行——与本项目 scenes.js 里
+  //    「按本文件位置解析，不按 cwd」是同一条教训（那里已踩过一次）。
+  const invitesFile = path.resolve(ROOT, 'config', 'invites.json');
   if (fs.existsSync(invitesFile)) {
     try {
       for (const { code, label } of JSON.parse(fs.readFileSync(invitesFile, 'utf8'))) {
@@ -231,6 +256,8 @@ function bootstrap() {
     } catch (err) {
       console.warn(`[invites] 种子渠道解析失败：${err.message}`);
     }
+  } else {
+    console.warn(`[invites] 未找到种子渠道文件：${invitesFile}（/r/<code> 短链将全部 404）`);
   }
 
   const app = createApp({ config, services, sellerId, repository, alipayClient, demoPayer, analytics });
@@ -252,6 +279,13 @@ function bootstrap() {
   const shutdown = (signal) => {
     console.log(`\n收到 ${signal}，正在关闭…`);
     server.close(() => {
+      // 两个库都要关：只关订单库会让 analytics 的连接与 WAL 检查点留到进程退出，
+      // 容器重启时留下 -wal/-shm 残留（2026-11-23 补上，与 repository.close() 成对）。
+      try {
+        analytics?.close?.();
+      } catch (err) {
+        console.warn(`[shutdown] analytics 关闭失败：${err.message}`);
+      }
       repository.close();
       process.exit(0);
     });

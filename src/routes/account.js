@@ -195,7 +195,6 @@ export function createAccountRouter({ repository, analytics }) {
     }
 
     const ipHash = hashIp(req.ip ?? req.socket?.remoteAddress);
-    const today = new Date().toISOString().slice(0, 10);
     const ipDaily = analytics.bumpIpDaily(ipHash, 'lead');
     if (ipDaily > LEAD_DAILY_IP_LIMIT) {
       return res.status(429).json({ error: '今日留资次数已达上限，请明天再试或直接邮件联系' });

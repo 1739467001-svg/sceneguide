@@ -242,18 +242,6 @@ export function namedNodes(scene) {
   return scene.nodes.filter((n) => n.name && n.name !== n.id);
 }
 
-/** 同名地标去重（OSM 里「食堂」这种裸名常常有好几个） */
-function dedupeByName(entities) {
-  const seen = new Set();
-  const out = [];
-  for (const e of entities) {
-    if (seen.has(e.node.name)) continue;
-    seen.add(e.node.name);
-    out.push(e);
-  }
-  return out;
-}
-
 /**
  * 主入口：回答一次导览请求。
  * 返回值同时包含「给 Agent 的结构化结果」与「给人看的文本」。

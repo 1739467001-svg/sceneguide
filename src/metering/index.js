@@ -15,15 +15,6 @@
 
 import { normalizeAmount } from '../a2m/protocol.js';
 
-/** 计量口径 */
-export const METERS = {
-  guide_call: { unit: 'call', label: '导览调用次数' },
-  tokens: { unit: 'token', label: '模型 token 消耗' },
-  distance_m: { unit: 'm', label: '规划路径总长度' },
-  poi_count: { unit: 'poi', label: '返回点位数量' },
-  clue_count: { unit: 'clue', label: '任务线索数量' },
-};
-
 /**
  * 从一次导览结果里抽取用量。
  *
@@ -84,20 +75,4 @@ export function priceFor(tier) {
   const amount = normalizeAmount(tier.unitPrice);
   if (amount === null) throw new Error(`档位单价非法：${tier.unitPrice}`);
   return amount;
-}
-
-/** 用量汇总（看板用） */
-export function summarize(usageRows) {
-  const summary = {};
-  for (const row of usageRows) {
-    const key = row.meter ?? row[0];
-    const quantity = Number(row.quantity ?? row[1] ?? 0);
-    const unit = row.unit ?? METERS[key]?.unit ?? '';
-    summary[key] = {
-      label: METERS[key]?.label ?? key,
-      unit,
-      total: (summary[key]?.total ?? 0) + quantity,
-    };
-  }
-  return summary;
 }

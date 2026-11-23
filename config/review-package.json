@@ -1,0 +1,43 @@
+{
+  "_comment": "评审附件包清单（单一事实源）。scripts/build-review-zip.mjs 按它打包，scripts/submission-readiness-check.mjs 按它核对「包内文件是否比源文件旧」。",
+  "_naming": "包内文件名一律 ASCII：中文文件名在压缩包里是否正确显示取决于解压工具是否尊重 UTF-8 标志位（Info-ZIP 的 unzip CLI 不尊重），评委用什么工具未知，故不让文件名承担编码风险。中文名与内容说明写在包内的 README.txt。",
+  "readme": "README.txt",
+  "files": [
+    {
+      "src": "作品介绍文档.pdf",
+      "name": "work-description.pdf",
+      "zh": "作品介绍文档.pdf",
+      "desc": "评委版一页说明书（5 页，可打印）"
+    },
+    {
+      "src": "演示视频-三维问路-SceneGuide-20261123.mp4",
+      "name": "demo-video-20261123.mp4",
+      "zh": "演示视频-三维问路-SceneGuide-20261123.mp4",
+      "desc": "38 秒真实沙箱支付全链路录屏"
+    },
+    {
+      "src": "作品封面-16x9.png",
+      "name": "cover-16x9.png",
+      "zh": "作品封面-16x9.png",
+      "desc": "作品主视觉封面（3200×1800）"
+    },
+    {
+      "src": "作品图标-方形960.png",
+      "name": "icon-square-960.png",
+      "zh": "作品图标-方形960.png",
+      "desc": "作品图标（960×960）"
+    },
+    {
+      "src": "验收说明.txt",
+      "name": "acceptance-notes.txt",
+      "zh": "验收说明.txt",
+      "desc": "怎么自己把这套东西验一遍（84 项）"
+    },
+    {
+      "src": "说明.txt",
+      "name": "notes.txt",
+      "zh": "说明.txt",
+      "desc": "沙箱演示环境说明，无需任何账号或邀请码"
+    }
+  ]
+}
