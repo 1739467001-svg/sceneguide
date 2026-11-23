@@ -122,6 +122,22 @@ for (const m of mentioned) {
     : bad(`文案里出现了 ${m}，但不在服务档位价目表里（${[...known].join(' / ')}）`);
 }
 
+step('②b 提交表单里不得残留占位符');
+// 教训（2026-11-24）：「如何获取作品」里的仓库链接曾写成 https://github.com/<账号>/…
+//   ——评委点开是 404，而闸门却因为**文里别处**有真实地址而判过。
+//   所以这里改成**通用占位符扫描**：提交表单里任何 <…> 形式的待填标记都不允许。
+{
+  const formText = [title, intro, detail, access, readyText].filter(Boolean).join('\n');
+  const placeholders = [...formText.matchAll(/<[^<>\n]{1,40}>/g)]
+    .map((m) => m[0])
+    .filter((t) => !/^<\/?[a-z][^<>]*>$/i.test(t))   // 排除 HTML 标签
+    .filter((t) => !/^<[a-z0-9_ -]+>$/i.test(t));
+  const uniq = [...new Set(placeholders)];
+  uniq.length === 0
+    ? ok('提交表单中无未替换的占位符')
+    : bad(`提交表单里残留占位符（评委点开会出错）：${uniq.join(' / ')}`);
+}
+
 step('③ 演示地址可用性（评委点开的第一个链接）');
 const demo = BASE;
 try {
