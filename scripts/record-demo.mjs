@@ -174,7 +174,15 @@ await shot('10 交付验收清单', 2600, async () => {
 await shot('11 社区反馈', 2600, async () => {
   await evalJs(`document.querySelector('#wall')?.scrollIntoView({block:'start'}); true`);
 });
-await shot('12 我的账户入口', 2400, async () => {
+await shot('12 官方接口对齐表', 3000, async () => {
+  await evalJs(`(() => {
+    const el = document.querySelector('#alignPanel');
+    if (!el) return 'no-panel';
+    window.scrollTo({ top: Math.max(0, el.getBoundingClientRect().top + window.scrollY - 80), behavior: 'instant' });
+    return 'ok';
+  })()`);
+});
+await shot('13 我的账户入口', 2400, async () => {
   await evalJs(`document.querySelector('#demo')?.scrollIntoView({block:'start'}); true`);
 });
 

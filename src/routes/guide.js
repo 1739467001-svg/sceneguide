@@ -193,6 +193,42 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
         .replace(/\//g, '_')
         .replace(/=/g, ''));
 
+      // ── 官方预下单形态（aipay 官网 MACHINE_PAY.md 的生产流程）──────────
+      // 🔴 这是**可选增强**，默认关闭；开启后 402 同时带两个头：
+      //    · Payment-Needed  —— 我们本地签名构造的账单（Agent 买方走这条，
+      //      对应官方参考实现与 alipay-pay-for-402-service 技能）
+      //    · amtPaymentLink  —— 官方 alipay.aipay.agent.payment.precreate 返回的
+      //      amt_pre_pay_id（走官方支付能力的买方用这条）
+      //    两条路径的验付环节完全一致（payment.verify + 携 Payment-Proof 重试），
+      //    所以五项核验 / 幂等履约 / 履约回执**都不需要改**。
+      //
+      // ⚠️ 必须优雅降级：预下单失败**绝不能**让 402 挑战发不出去——
+      //    本地签名的 Payment-Needed 始终是兜底（它不依赖任何 OpenAPI 调用）。
+      if (config.env === 'production' && config.precreate?.enabled) {
+        try {
+          const pre = await alipayClient.precreate({
+            outTradeNo,
+            serviceId: tier.serviceId,
+            goodsName,
+            amount,
+            payBefore,
+            currency: 'CNY',
+            memo: `三维问路 · ${tier.label}`,
+          });
+          if (pre.ok) {
+            res.set('amtPaymentLink', pre.amtPrePayId);
+            res.set('X-SG-Precreate', 'ok');
+            console.log(`[402] 预下单成功 out_trade_no=${outTradeNo} amt_pre_pay_id=${pre.amtPrePayId}`);
+          } else {
+            res.set('X-SG-Precreate', `failed:${pre.errorCode}`);
+            console.warn(`[402] 预下单失败（已降级为本地签名账单）: ${pre.errorCode} ${pre.errorMessage}`);
+          }
+        } catch (err) {
+          res.set('X-SG-Precreate', `error:${err.message}`.slice(0, 120));
+          console.warn(`[402] 预下单异常（已降级）: ${err.message}`);
+        }
+      }
+
       return res.status(402).json({
         code: 'Payment-Needed',
         message: '需要支付',

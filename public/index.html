@@ -441,6 +441,59 @@
         <div id="traceView"></div>
       </div>
     </div>
+
+    <!-- 官方接口对齐表：把「用了支付宝哪些官方能力」摆到台面上 -->
+    <div class="panel reveal" id="alignPanel" style="margin-top:22px">
+      <h3 class="panel-title">与支付宝官方接口的对齐</h3>
+      <p style="font-size:13px;color:var(--text-dim);margin:0 0 12px">
+        本作品只使用官方 AI 付（按量付费 / A2M）要求的接口，不自造协议、不绕过收银台。
+        下表逐条列出<b>调用的官方接口</b>、<b>它解决的问题</b>与<b>本系统的实测状态</b>。
+      </p>
+      <table class="data">
+        <thead>
+          <tr><th style="width:38%">官方接口 / 协议元素</th><th style="width:34%">解决什么</th><th>本系统状态</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>alipay.aipay.agent.payment.precreate</code><br><span class="hint">按量付费预下单</span></td>
+            <td>向支付宝创建预下单，取得 <code>amt_pre_pay_id</code></td>
+            <td><b>已实现</b>（<code>src/a2m/client.js</code>）·生产环境输出 <code>amtPaymentLink</code> 头<br>
+                <span class="hint">沙箱不调用（沙箱只有固定 mock 服务），生产开关见 <code>config/production.json</code></span></td>
+          </tr>
+          <tr>
+            <td><code>Payment-Needed</code> 响应头<br><span class="hint">商家本地构造 + RSA2 签名</span></td>
+            <td>把「买什么、多少钱、给谁」以可验签的形式交给买方</td>
+            <td><b>已实现</b> · 官方沙箱端到端跑通<br>
+                <span class="hint">嵌套结构 + 扁平签名子集，官方文档未写明，见技术规格 §0.5</span></td>
+          </tr>
+          <tr>
+            <td><code>alipay.aipay.agent.payment.verify</code></td>
+            <td>校验买方的支付凭证与交易归属</td>
+            <td><b>已实现</b> · 在此之上做<b>五项业务核验</b>（active / amount / out_trade_no / resource_id / trade_no 防重）</td>
+          </tr>
+          <tr>
+            <td><code>alipay.aipay.agent.fulfillment.confirm</code></td>
+            <td>履约回执：告诉支付宝「资源已交付」</td>
+            <td><b>已实现</b> · 状态机 UNFULFILLED → PENDING_CONFIRM → FULFILLED</td>
+          </tr>
+          <tr>
+            <td><code>Payment-Validation</code> 响应头</td>
+            <td>把可归属的交付凭证回传给买方</td>
+            <td><b>已实现</b> · 附证据哈希，可复算</td>
+          </tr>
+          <tr>
+            <td>沙箱收银（<code>alipay-bot</code> / 官方买方技能）</td>
+            <td>买家侧完成付款的官方路径</td>
+            <td><b>已打通</b> · 站内「走一遍真实沙箱支付」走的就是它</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="notice notice-cyan" style="margin-top:12px">
+        <b>为什么接口数只有这些：</b>按量付费官方只要求实现 3 个接口（402 / 验付 / 履约确认），
+        而网站支付与 APP 支付要 6 个（下单 / 查询 / 退款 / 退款查询 / 关闭 / 异步通知）。
+        这也是本项目选择按量付费赛道的工程理由之一。
+      </div>
+    </div>
   </div>
 </section>
 

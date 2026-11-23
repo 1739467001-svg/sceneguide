@@ -73,6 +73,11 @@ export function loadProductionConfig() {
     privateKeyB64: raw.privateKey,
     buyerUserId: null,
     gateway: raw.gateway ?? 'https://openapi.alipay.com/gateway.do',
+    // 官方预下单形态（amtPaymentLink）开关。默认关闭：
+    // 官方未公开完整响应 JSON，先用 scripts/precreate-check.mjs 实测确认字段名再打开。
+    precreate: {
+      enabled: raw.precreate?.enabled === true,
+    },
   };
 }
 

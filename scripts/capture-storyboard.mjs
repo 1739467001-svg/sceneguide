@@ -164,6 +164,16 @@ await capture('10-我的账户-额度与转赠', '我的账户|权益额度');
 await scrollTo('#pricing', 'end');
 await capture('11-机构采购-B端入口', '采购|团体|机构');
 
+// 13 官方接口对齐表——把「用了支付宝哪些官方接口」摆在台面上
+await evalJs(`(() => {
+  const t = [...document.querySelectorAll('.panel-title')].find(x => /对齐/.test(x.textContent || ''));
+  const el = t ? t.closest('.panel') : null;
+  if (!el) return 'no-panel';
+  window.scrollTo({ top: Math.max(0, el.getBoundingClientRect().top + window.scrollY - 80), behavior: 'instant' });
+  return 'ok';
+})()`);
+await capture('13-官方接口对齐表', { scope: '#alignPanel', keys: 'precreate' });
+
 // 12 服务档位（四档，含首发半价）——在演示区右栏，不在商业化区
 await evalJs(`(() => { const p = [...document.querySelectorAll('.panel')]
   .find(x => /服务档位/.test(x.textContent || ''));
