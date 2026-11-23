@@ -111,7 +111,7 @@
       <div class="terminal reveal in" aria-label="真实 402 协议往返报文">
         <div class="term-bar">
           <span class="term-dots"><i></i><i></i><i></i></span>
-          <span class="term-title">scene-guide · A2M 402 协议实测</span>
+          <span class="term-title" id="termEnv">scene-guide · A2M 402 协议实测</span>
         </div>
         <div class="term-body" id="termBody">载入报文…</div>
         <div class="term-foot" id="termFoot"></div>
@@ -302,7 +302,7 @@
         <h3 class="panel-title panel-title-sm">一键跑完上面所有验收</h3>
         <p class="panel-note">
           验收脚本随作品一起交付。它会真的发起支付、真的查订单状态、真的解码协议头——
-          右侧输出为 <b>2026-11-20 真实运行捕获</b>（78 项：402 全链路 / 幂等履约 / 额度台账 / 打卡闭环 / 增长归因 / MCP Agent 链路 / 买家账户中心 / 机构采购留资 / 深层 404 / 数据库体检 / 离线协议自检 69 项 / 三维渲染完整性）。
+          右侧输出为 <b>2026-11-20 真实运行捕获</b>（79 项：402 全链路 / 幂等履约 / 额度台账 / 打卡闭环 / 增长归因 / MCP Agent 链路 / 买家账户中心 / 机构采购留资 / 深层 404 / 数据库体检 / 离线协议自检 69 项 / 三维渲染完整性）。
         </p>
         <div class="codeblock">
           <div class="codeblock-head"><span>scripts/verify.sh</span>
@@ -410,7 +410,7 @@
 ▸ 20. 三维渲染完整性（浏览器层）
   ✓ 三维渲染完整性通过（建筑对齐 footprint / demo-park 不黑屏，见 scripts/verify-render.mjs）
 ────────────────────────────────────────────────────────
-全部通过：78 项
+全部通过：79 项
 </code></pre>
         </div>
       </div>

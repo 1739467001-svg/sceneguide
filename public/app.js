@@ -42,6 +42,8 @@
 
   const state = {
     meta: null,
+    // 运行环境（sandbox / production）——按钮文案与生产模式支付流程都依赖它
+    env: 'sandbox',
     trace: null,
     sceneId: null,
     scene: null,
@@ -532,6 +534,17 @@ function countUpSafe(v) {
 }
   function renderMeta(meta) {
     state.meta = meta;
+    state.env = meta.env ?? state.env;
+
+    // 协议终端展示的是**静态抓取快照**（沙箱实抓）：生产环境下必须标明环境，
+    // 否则评委会把快照里的 ¥0.01 当成生产实收价，与上方定价表矛盾。
+    const termEnv = document.querySelector('#termEnv');
+    if (termEnv) {
+      termEnv.textContent =
+        state.env === 'production'
+          ? 'scene-guide · A2M 402 协议实测（快照录于沙箱环境）'
+          : 'scene-guide · A2M 402 协议实测';
+    }
 
     // Hero 统计：纯数字走滚动动画，组合值（"593 / 597"）直接落。
     // 多真实场景后锁定旗舰场景展示（数量最大、演示主场景）
@@ -1506,8 +1519,8 @@ ${JSON.stringify(
           再携带 <code>Payment-Proof</code> 重试同一请求即可获得资源。
         </div>
         <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;align-items:center">
-          <button class="btn btn-primary" id="payBtn">走一遍真实沙箱支付</button>
-          <span style="font-size:12.5px;color:var(--text-faint)">点击后将真实调用支付宝沙箱收银接口</span>
+          <button class="btn btn-primary" id="payBtn">${state.env === 'production' ? '查看本次支付账单' : '走一遍真实沙箱支付'}</button>
+          <span style="font-size:12.5px;color:var(--text-faint)">${state.env === 'production' ? '生产环境不代付真实资金——本页会给出可交给支付宝 AI 付能力的账单与指引' : '点击后将真实调用支付宝沙箱收银接口'}</span>
         </div>
       </div>`);
 
@@ -1531,6 +1544,16 @@ ${JSON.stringify(
         }),
       });
       const j = await res.json();
+
+      // 🔴 生产环境：后端返回 409 + PRODUCTION_PAYMENT_REQUIRED + 完整指引，
+      //    这里必须渲染成**可操作的支付账单卡**，而不是通用错误——
+      //    旧逻辑会把 j.error 直接当错误显示，还配上「沙箱偶发繁忙，请重试」
+      //    这种在生产环境毫无意义的提示（且与文案自相矛盾）。
+      if (j.code === 'PRODUCTION_PAYMENT_REQUIRED') {
+        renderProductionBill(j);
+        return;
+      }
+
       if (j.error) {
         setError(j.error, '服务端已自动重试 3 次。支付宝沙箱偶发繁忙，请点一次按钮重试。');
         return;
@@ -1541,6 +1564,47 @@ ${JSON.stringify(
     } catch (err) {
       setError(err.message, '支付请求失败。');
     }
+  }
+
+  /**
+   * 生产环境的「支付账单卡」。
+   *
+   * 场景：站点已切生产，服务端不会代付真实资金（那必须由用户本人或其 Agent 确认）。
+   * 于是这里把**这一笔该付什么、怎么付**完整摊开：
+   *   金额 / 商品 / 订单号 / 给 Agent 的指引 / 给人的说明，
+   * 评委拿到这张卡就能立刻用自己的支付宝或让 Agent 完成这笔支付。
+   */
+  function renderProductionBill(j) {
+    setResult(`
+      <div class="panel" style="margin:0">
+        <div class="panel-head">
+          <h3 class="panel-title">本次支付账单</h3>
+          <span class="tag cyan">生产环境</span>
+        </div>
+        <dl class="kv">
+          <dt>商品</dt><dd>${esc(j.goods_name ?? '—')}</dd>
+          <dt>金额</dt><dd><b>¥${esc(j.amount ?? '—')}</b></dd>
+          <dt>商户订单号</dt><dd><code>${esc(j.out_trade_no ?? '—')}</code></dd>
+          <dt>资源标识</dt><dd><code>${esc(j.resource_id ?? '—')}</code></dd>
+        </dl>
+        <div class="notice notice-blue" style="margin-top:14px">
+          <b>用你的支付宝付这一笔：</b>本页不代付真实资金——按协议必须由你本人或你的 Agent 确认付款。
+          ${j.amt_payment_link ? `
+          <br /><a class="btn btn-primary" style="margin-top:10px"
+             href="${esc(j.amt_payment_link)}" target="_blank" rel="noopener">打开支付宝付款</a>
+          <br /><span style="font-size:12px;opacity:.8">（${esc(j.amt_payment_link)}）</span>` : ''}
+          ${j.agent_instructions ? `
+          <div style="margin-top:12px">
+            <b>Agent 场景：</b><br />
+            <code style="display:block;margin-top:6px;white-space:pre-wrap;font-size:11.5px">${esc(j.agent_instructions)}</code>
+          </div>` : ''}
+          <div style="margin-top:12px">
+            <b>人付：</b>用你的支付宝完成这笔支付后，把支付凭证（Payment-Proof）
+            带回<b>同一个请求</b>重试即可交付资源——订单号 <code>${esc(j.out_trade_no ?? '')}</code> 已经落库。
+          </div>
+        </div>
+        ${j.message ? `<div class="notice notice-amber" style="margin-top:12px">${esc(j.message)}</div>` : ''}
+      </div>`);
   }
 
   /** 支付成功后刷新订单看板，让「计量是真的」当场可见 */

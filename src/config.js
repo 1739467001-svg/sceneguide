@@ -4,8 +4,15 @@ import path from 'node:path';
 export const ROOT = path.resolve(import.meta.dirname, '..');
 
 const SANDBOX_FILE = path.join(ROOT, '.alipay-sandbox.json');
-const PRODUCTION_FILE = path.join(ROOT, 'config', 'production.json');
-const SERVICES_FILE = path.join(ROOT, 'config', 'services.json');
+// ⚠️ 路径可用环境变量覆盖（ALIPAY_PRODUCTION_CONFIG / ALIPAY_SERVICES_CONFIG）：
+//    生产模式无法在真实生产机上反复试错，而「生产分支的契约」必须能离线验证
+//    ——scripts/prod-pay-ux-check.mjs 就是用临时配置起一个本地生产实例跑契约检查。
+const PRODUCTION_FILE = process.env.ALIPAY_PRODUCTION_CONFIG
+  ? path.resolve(process.env.ALIPAY_PRODUCTION_CONFIG)
+  : path.join(ROOT, 'config', 'production.json');
+const SERVICES_FILE = process.env.ALIPAY_SERVICES_CONFIG
+  ? path.resolve(process.env.ALIPAY_SERVICES_CONFIG)
+  : path.join(ROOT, 'config', 'services.json');
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
