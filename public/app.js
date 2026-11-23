@@ -1043,57 +1043,47 @@ ${esc(JSON.stringify(envelope, null, 2))}</code></pre>
 
   /* ────────────── 交付与验收 ────────────── */
 
+  /**
+   * 交付物清单。
+   *
+   * 🔴 2026-11-22 重写：旧版是「四条赛道各一份提交物」（Vibe Pay 为主赛道、
+   *    收款写 nowpay、Skill Pay 写实时到账不经平台）——那是**旧策略**，
+   *    与现行投递（**只投 Machine Pay**，收款走支付宝 A2M 智能收 402）矛盾，
+   *    而这个区块的标题恰恰是「我提交什么」，评委第一眼就会读到。
+   *    现在：一张主作品卡（投递物）+ 一张「已实现但不在此重复投稿」的能力清单卡。
+   */
   const DELIVERABLES = [
     {
-      track: 'vibe-pay',
-      tag: '主赛道',
-      tagCls: 'blue',
-      work: '三维问路 · 场景导览工作台',
-      brief: '网页应用形态。三维场景 + 自然语言问路 + 一次性付费解锁精确结果。',
-      rows: [
-        ['交付形态', '网页应用（可部署、可分享）'],
-        ['演示入口', '<a href="#demo">站点实时演示</a>'],
-        ['收款方式', 'nowpay 智能收款套件 / 观猹爱猹收'],
-        ['定价', '单次 ¥0.50 · 十次包 ¥4.50 · 场景任务 ¥9.90'],
-      ],
-    },
-    {
       track: 'machine-pay',
-      tag: '技术纵深',
+      tag: '★ 投递物 · Machine Pay',
       tagCls: 'cyan',
-      work: 'A2M 智能收按量付费资源',
-      brief: 'HTTP 402 协议服务端。商家本地构造 Payment-Needed，买方携凭证重试后交付。',
+      work: '三维问路 · A2M 智能收按量付费资源',
+      brief:
+        '一份作品、一个内核：基于真实 OpenStreetMap 拓扑的三维场景导览，'
+        + '通过支付宝 A2M 智能收（HTTP 402）按次计费。Agent 可自行发现、自行支付、自行取回交付。',
       rows: [
-        ['交付形态', 'REST API · HTTP 402'],
-        ['演示入口', '<a href="#protocol">协议报文</a> · <a href="#api">API 参考</a>'],
-        ['核心接口', 'payment.verify / fulfillment.confirm'],
-        ['计费口径', '按次 + 五维用量计量'],
+        ['交付形态', 'REST API · HTTP 402 + 同构的 MCP 发现端点'],
+        ['演示入口', '<a href="#demo">站点实时演示</a> · <a href="#protocol">协议报文</a>'],
+        ['收款方式', '支付宝 A2M 智能收（HTTP 402）· 非自建收银'],
+        ['核心接口', 'payment.verify / fulfillment.confirm / payment.precreate'],
+        ['定价', '单次 ¥0.50 · 十次包 ¥4.50 · 场景任务 ¥9.90 · 首发半价 ¥4.95'],
+        ['官方验收', '支付宝<b>官方买方脚本</b>端到端买通（<code>bash scripts/official-buyer-check.sh</code>）'],
       ],
     },
     {
-      track: 'skill-pay',
-      tag: '衍生形态',
+      track: 'capabilities',
+      tag: '同一内核已实现的能力 · 不重复投稿',
       tagCls: 'violet',
-      work: 'scene-guide 商家技能包',
-      brief: '把导览能力封装成可安装的技能。Agent 装上它，就能在对话里直接问路并付费。',
+      work: '另三条赛道的对应能力（已在本作品内可现场验证）',
+      brief:
+        '官方规则「同一作品不得跨赛道重复投稿」。本作品的核心是同一套能力，'
+        + '拆成多份投递既是重复投稿，也会分散评委注意力——所以下列能力已做进本作品，不再单投。',
       rows: [
-        ['交付形态', 'SKILL.md 技能包'],
-        ['演示入口', '<a href="#agent">SKILL.md 与买方 CLI</a>'],
-        ['安装方式', 'npx @alipay/agent-payment'],
-        ['结算', 'SkillPay 实时到账不经平台'],
-      ],
-    },
-    {
-      track: 'agent-pay',
-      tag: '交易链路',
-      tagCls: 'amber',
-      work: 'Agent 自主采购链路',
-      brief: '消费者 Agent 自行发现服务、发起支付、拿到交付——整条链路可现场演示。',
-      rows: [
-        ['交付形态', '发现 → 支付 → 交付 → 回执'],
-        ['演示入口', '<a href="#demo">一键真实沙箱支付</a>'],
-        ['安全约束', '逐笔授权 + 支付意图风控'],
-        ['凭证回传', 'Payment-Validation 响应头'],
+        ['网页应用形态', '<a href="#demo">即本作品演示页</a>——三维场景 + 自然语言问路 + 付费解锁'],
+        ['商家技能包', '<a href="#agent">SKILL.md</a>：把导览能力封装成可安装技能，Agent 装上即可问路并付费'],
+        ['Agent 自主采购', '<a href="#transaction">MCP 发现 → 402 支付 → 交付 → 回执</a>，四环可现场演示'],
+        ['官方回调通道', '<code>AP_NOTIFY_URL</code> 异步通知端点（人付款路径）+ <code>query-alipay-payment</code> 查询'],
+        ['发现入口', '<a href="#api">llms.txt</a> · <code>POST /mcp</code> · <code>GET /api/v1/scenes</code>'],
       ],
     },
   ];
@@ -1222,8 +1212,9 @@ ${JSON.stringify(
       evidence: `<div class="stage-rules">
         <div class="stage-rule"><b>收款账户</b> 默认进入签约账号的支付宝余额账户</div>
         <div class="stage-rule"><b>到账</b> 实时到账；<b>新签约收单产品未满 90 日</b>或<b>连续交易未满 30 日</b>的款项次日结算</div>
-        <div class="stage-rule"><b>平台抽成</b> 0 —— 资金不经过平台账户，无需代收分账</div>
+        <div class="stage-rule"><b>服务费率</b> 单笔 1.0%，个人开发者活动期（2026.4.15–12.31）<b>零费率</b>；资金<b>直接进商家签约账号的支付宝余额</b>，不经平台代收、无需分账</div>
         <div class="stage-rule"><b>退款</b> 交易发生后 12 个月内可退；按量付费退款时服务费<b>一并退回</b>商家账户</div>
+        <div class="stage-rule"><b>结果感知</b> 官方要求「支付结果以<b>异步通知或查询接口</b>为准」——本服务已提供 <code>AP_NOTIFY_URL</code> 通知端点（<code>POST /api/v1/pay/notify</code>，金额防篡改 + 幂等，且<b>通知只推进状态机、不发放资源</b>）</div>
         <div class="stage-rule"><b>防重复履约</b> 同一 <code>trade_no</code> 不得二次履约（<code>fulfillment.confirm</code> 幂等保护）</div>
       </div>`,
     });
