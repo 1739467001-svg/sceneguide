@@ -959,34 +959,39 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
         nameEn: 'SceneGuide',
         tagline: '可被 Agent 自动购买的场景导览服务',
       },
+      // ⚠️ role/form 的措辞必须与**现行投递策略**一致（聚焦 Machine Pay 单赛道）：
+      //    旧文案写「Vibe Pay = 交付形态·主展示」「Skill Pay = 衍生形态」，
+      //    读起来像四条赛道各投一份，与提交表单「只投 Machine Pay」直接矛盾——
+      //    评委对照站点与提交物时一眼能看出。保留四条是为了展示能力覆盖面，
+      //    但必须明确标注「本作品投递哪一条」。
       tracks: [
         {
           id: 'machine-pay',
           name: 'Machine Pay',
-          role: '主赛道',
+          role: '★ 本作品投递赛道',
           brief: '让 AI 服务按实际使用量计费与支付，以可核验用量完成结算。',
-          form: 'REST API · HTTP 402（实现最完整）',
+          form: 'REST API · HTTP 402（402 挑战 / 凭证验签 / 五项核验 / 幂等履约 / 履约回执 全链路）',
         },
         {
           id: 'vibe-pay',
           name: 'Vibe Pay',
-          role: '交付形态 · 主展示',
+          role: '能力已实现 · 不重复投稿',
           brief: '为可运行的 AI 应用接入收款，让创意成为可经营的产品。',
-          form: '网页应用',
+          form: '网页应用形态（本站演示页即该形态，可现场操作）',
         },
         {
           id: 'skill-pay',
           name: 'Skill Pay',
-          role: '衍生形态',
+          role: '能力已实现 · 不重复投稿',
           brief: '为 AI 技能接入收款，让技能从调用到交付形成完整闭环。',
-          form: 'SKILL.md',
+          form: 'SKILL.md 商家技能包（仓库内，供买家 Agent 装载）',
         },
         {
           id: 'agent-pay',
           name: 'Agent Pay',
-          role: '交易链路',
+          role: '能力已实现 · 不重复投稿',
           brief: '探索 Agent 发现服务、发起支付与获得交付的新型交易链路。',
-          form: 'Agent 自主采购',
+          form: 'MCP 发现端点（tools/call 直接返回带签名的支付账单头）',
         },
       ],
       stats,

@@ -256,7 +256,7 @@
           <div id="entBody"><div class="skeleton-text">加载中…</div></div>
           <a href="account.html" style="display:inline-block;margin-top:10px;font-size:12.5px">我的账户：订单 / 转赠 / 退款 →</a>
         </div>
-        <div class="panel panel-tight" style="margin-bottom:14px">
+        <div class="panel panel-tight" id="tierPanel" style="margin-bottom:14px">
           <div class="label-cap">服务档位</div>
           <table class="data" id="tierTable"><tbody></tbody></table>
         </div>
@@ -302,7 +302,7 @@
         <h3 class="panel-title panel-title-sm">一键跑完上面所有验收</h3>
         <p class="panel-note">
           验收脚本随作品一起交付。它会真的发起支付、真的查订单状态、真的解码协议头——
-          右侧输出为 <b>2026-11-20 真实运行捕获</b>（76 项：402 全链路 / 幂等履约 / 额度台账 / 打卡闭环 / 增长归因 / MCP Agent 链路 / 买家账户中心 / 机构采购留资 / 深层 404 / 数据库体检 / 离线协议自检 69 项 / 三维渲染完整性）。
+          右侧输出为 <b>2026-11-20 真实运行捕获</b>（77 项：402 全链路 / 幂等履约 / 额度台账 / 打卡闭环 / 增长归因 / MCP Agent 链路 / 买家账户中心 / 机构采购留资 / 深层 404 / 数据库体检 / 离线协议自检 69 项 / 三维渲染完整性）。
         </p>
         <div class="codeblock">
           <div class="codeblock-head"><span>scripts/verify.sh</span>
@@ -410,7 +410,7 @@
 ▸ 20. 三维渲染完整性（浏览器层）
   ✓ 三维渲染完整性通过（建筑对齐 footprint / demo-park 不黑屏，见 scripts/verify-render.mjs）
 ────────────────────────────────────────────────────────
-全部通过：76 项
+全部通过：77 项
 </code></pre>
         </div>
       </div>
@@ -465,18 +465,23 @@
   <div class="wrap">
     <div class="sec-head reveal">
       <span class="eyebrow">赛道契合</span>
-      <h2>一个内核，四份提交物，对应四条赛道</h2>
+      <h2>一个内核，主投 Machine Pay</h2>
       <p>
-        下列赛道描述为 PAYATHON 2026 官方原文。同一套场景内核按不同交付形态打包，
-        分别投不同赛道——它们是四种交付物，不是一份物料换四个赛道。
+        下列赛道描述为 PAYATHON 2026 官方原文。本作品的<b>唯一投递赛道是 Machine Pay</b>：
+        它对支付宝 A2M 智能收（HTTP 402）的接入做到了官方产品级——402 挑战、凭证验签、
+        五项核验、幂等履约与履约回执全部在官方沙箱端到端跑通，是这四条线里实现最完整的一条。
       </p>
       <p class="callout-box">
-        <b style="color:var(--text)">为什么这样分配：</b>
-        <b>Machine Pay 是主赛道</b>——本作品对支付宝 A2M 智能收（HTTP 402）的接入做到了官方产品级：
-        402 挑战、凭证验签、履约回执全部在官方沙箱端到端跑通，这是四条线里实现最完整的一条；
-        Vibe Pay 以网页应用形态作为<b>主展示面</b>（评委能直接操作的部分）；
-        Skill Pay 与 Agent Pay 各补一份形态，让同一条能力在不同交付面上都可被调用。
-        同一赛道内最多一个作品获奖，所以资源集中在这一个内核上。
+        <b style="color:var(--text)">为什么聚焦一条赛道：</b>
+        官方规则明确「<b>同一作品不得跨赛道重复投稿</b>」，且「同一赛道内最多一个作品获奖」。
+        本作品的核心是<b>同一套能力</b>（402 按量付费 + 真实地理拓扑 + 可核验交付），
+        拆成四份投递既是重复投稿，也会在四个赛道里同时损失评委注意力。
+        所以资源全部压在 Machine Pay 的实现深度上——把这一个赛道做到可被独立复核，
+        比在四条赛道上各交一份浅的更划算。
+        <br /><br />
+        其余三条赛道的能力<b>已在本作品内实现并可现场验证</b>（网页应用形态见本页演示；
+        SKILL.md 商家技能包见仓库；MCP 发现端点见「Agent 接入」），
+        只是不作为独立投稿重复提交。
       </p>
     </div>
     <div class="grid g4" id="trackCards"></div>
@@ -488,7 +493,7 @@
   <div class="wrap">
     <div class="sec-head reveal">
       <span class="eyebrow">商业化</span>
-      <h2>按量计费，用量可核验<br />这是 Vibe Pay 说的「可经营」</h2>
+      <h2>按量计费，用量可核验<br />这是官方说的「可经营」</h2>
       <p>
         官方按量付费接口<b>不提供自动 token 计量</b>，计量由商家服务端自行完成。
         这一层自己建，也是本项目里最能写进简历的工程增量。
@@ -516,22 +521,42 @@
       </div>
 
       <div class="panel">
-        <h3 class="panel-title">可交付的两种商品</h3>
+        <h3 class="panel-title">可交付的商品档位</h3>
         <div class="feature" style="margin-bottom:12px">
           <div class="feature-head">
             <h4>单次导览</h4>
-            <span class="tag cyan">按次</span>
+            <span class="tag cyan">按次 · ¥0.50</span>
           </div>
           <p>一次问答式的场景导览。<b>低门槛、可冲动消费</b>，适合 Agent 高频调用。</p>
         </div>
-        <div class="feature">
+        <div class="feature" style="margin-bottom:12px">
+          <div class="feature-head">
+            <h4>十次导览包</h4>
+            <span class="tag cyan">¥4.50 / 10 次</span>
+          </div>
+          <p>
+            一次付费买到 <b>10 次额度</b>，额度存在商家侧权益台账、逐次扣减、耗尽才回到 402，
+            <b>不重复收费</b>。已购额度还能<b>生成礼品码转赠</b>给他人——一次付费带来两个用户。
+          </p>
+        </div>
+        <div class="feature" style="margin-bottom:12px">
           <div class="feature-head">
             <h4>场景任务</h4>
-            <span class="tag amber">可交付的教育产品</span>
+            <span class="tag amber">¥9.90 · 可交付的教育产品</span>
           </div>
           <p>
             线索链 → 途经站点 → 评分规则 → 带几何哈希的完成凭证。
             <b>一次任务是一个可交付物</b>，家长与研学机构为它付费的意愿远高于为一次查询付费。
+          </p>
+        </div>
+        <div class="feature">
+          <div class="feature-head">
+            <h4>单次导览（首发半价）</h4>
+            <span class="tag amber">¥4.95 · 限时</span>
+          </div>
+          <p>
+            与单次导览<b>同内容、独立定价</b>的社群首发档——平台硬约束是「注册价必须等于实收价」，
+            所以不同价格必须注册成不同服务。
           </p>
         </div>
         <div class="notice notice-cyan" style="margin-top:14px">
@@ -682,9 +707,9 @@ description: 当用户询问某个具体场所（校园、园区、景区、展�
 curl -v "https://&lt;服务域名&gt;/api/v1/guide?scene=&lt;场景ID&gt;&amp;query=&lt;问题&gt;"
 
 ## 第二步：处理 402 响应
-你将收到一个**状态码为 402 的响应报文，其中包含 `Payment-Needed` 响应头**。
-此时你需要将**整个 402 响应报文**传递给支付宝的
-**`alipay-pay-for-402-service`** 技能，引导用户完成付款。
+你将收到一个<b>状态码为 402 的响应报文，其中包含 <code>Payment-Needed</code> 响应头</b>。
+此时你需要将<b>整个 402 响应报文</b>传递给支付宝的
+<code>alipay-pay-for-402-service</code> 技能，引导用户完成付款。
 
 ## 第三步：交付
 付款完成后，携带 `Payment-Proof` 重试原请求，得到 HTTP 200 与

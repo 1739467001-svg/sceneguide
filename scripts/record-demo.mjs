@@ -25,8 +25,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const BASE = (process.env.BASE_URL ?? 'https://121.43.80.231/sceneguide').replace(/\/$/, '');
+// 文件名统一用 YYYYMMDD（与既有物料命名一致，避免出现两份同内容不同名的视频）
+const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 const OUT = process.env.OUT
-  ?? path.resolve('提交材料/演示视频-三维问路-SceneGuide-' + new Date().toISOString().slice(0, 10) + '.mp4');
+  ?? path.resolve(`提交材料/演示视频-三维问路-SceneGuide-${today}.mp4`);
 const WORK = process.env.WORK ?? '/tmp/sg-record';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const VIEW = { width: 1440, height: 900 };
