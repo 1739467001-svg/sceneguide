@@ -19,7 +19,7 @@ PAYATHON 2026 · Machine Pay 赛道
    待生产 service_id 审核通过后自动生效。
 
 4. **三条命令可独立复核**
-   BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh   # 77 项
+   BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh   # 78 项
    node scripts/verify-mcp-flow.mjs                                  # 21 项
    node scripts/verify-account-flow.mjs                              # 17 项
 

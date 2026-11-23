@@ -302,7 +302,7 @@
         <h3 class="panel-title panel-title-sm">一键跑完上面所有验收</h3>
         <p class="panel-note">
           验收脚本随作品一起交付。它会真的发起支付、真的查订单状态、真的解码协议头——
-          右侧输出为 <b>2026-11-20 真实运行捕获</b>（77 项：402 全链路 / 幂等履约 / 额度台账 / 打卡闭环 / 增长归因 / MCP Agent 链路 / 买家账户中心 / 机构采购留资 / 深层 404 / 数据库体检 / 离线协议自检 69 项 / 三维渲染完整性）。
+          右侧输出为 <b>2026-11-20 真实运行捕获</b>（78 项：402 全链路 / 幂等履约 / 额度台账 / 打卡闭环 / 增长归因 / MCP Agent 链路 / 买家账户中心 / 机构采购留资 / 深层 404 / 数据库体检 / 离线协议自检 69 项 / 三维渲染完整性）。
         </p>
         <div class="codeblock">
           <div class="codeblock-head"><span>scripts/verify.sh</span>
@@ -410,7 +410,7 @@
 ▸ 20. 三维渲染完整性（浏览器层）
   ✓ 三维渲染完整性通过（建筑对齐 footprint / demo-park 不黑屏，见 scripts/verify-render.mjs）
 ────────────────────────────────────────────────────────
-全部通过：77 项
+全部通过：78 项
 </code></pre>
         </div>
       </div>
@@ -493,7 +493,17 @@
         而网站支付与 APP 支付要 6 个（下单 / 查询 / 退款 / 退款查询 / 关闭 / 异步通知）。
         这也是本项目选择按量付费赛道的工程理由之一。
       </div>
-    </div>
+
+      <div class="notice" style="margin-top:12px;border-left-color:#22d3a6">
+        <b style="color:var(--text)">最硬的一项证据：被支付宝<b>官方买方脚本</b>买通过。</b><br />
+        上面这些接口不是我们自己说好使就算数——我们用<b>支付宝官方写的</b>买方脚本
+        <code>local_402_sandbox_pay.py</code>（官方 Skill 内置）去买<b>本服务</b>：
+        它自己发起请求、拿到 402 账单、走官方沙箱收银付款、携 <code>Payment-Proof</code> 重试，
+        然后由<b>官方脚本自己</b>校验交付证据。<br />
+        官方脚本的结论原文：<b>「AI 按量付费沙箱服务端联调通过」</b>。
+        任何人都可以复跑同一条命令验证：
+        <br /><code>bash scripts/official-buyer-check.sh</code>
+      </div>
   </div>
 </section>
 
