@@ -31,22 +31,32 @@ import Database from 'better-sqlite3';
  *      verify-account-flow）走的是**真实**链路（公开 402 / MCP 支付），
  *      服务端无法从协议层面区分，只能按访客前缀折叠。
  *
+ * 🔴 visitor_id 必须套 COALESCE（2026-11-23 测试复现的漏算）：
+ *    SQL 是三值逻辑——`NULL LIKE 'mcp-e2e-%'` 得 NULL，`NOT NULL` 还是 NULL，
+ *    在 WHERE 里不成立。于是**任何 visitor_id 为 NULL 的订单都会被
+ *    `NOT SELF_TEST_SQL` 静默排除**，哪怕它 source='api' 是实打实的外部调用。
+ *    这不是理论问题：归因字段是后来加的，旧库迁移上来的历史订单 visitor_id
+ *    全是 NULL——升级后这些真实付费订单从 paidReal 里整批消失（实测复现：
+ *    4 笔已付只算出 1 笔真实）。
+ *    套上 COALESCE(visitor_id,'') 后 NULL 变成空串，LIKE 得 0（假），
+ *    对已有访客的订单行为完全不变。
+ *
  * 变更历史：2026-11-21 之前只看 source，导致每次跑 MCP 验收都在给
  * 「其中真实」充值——评委看到的真实付费数被作者自己的脚本抬高。
  */
 const SELF_TEST_SQL = `(source = 'demo'
-       OR visitor_id LIKE 'mcp-e2e-%'
-       OR visitor_id LIKE 'acct-%'
-       OR visitor_id LIKE 'verify-%'
-       OR visitor_id LIKE 'probe-%'
-       OR visitor_id LIKE 'story-demo-%')`;
+       OR COALESCE(visitor_id, '') LIKE 'mcp-e2e-%'
+       OR COALESCE(visitor_id, '') LIKE 'acct-%'
+       OR COALESCE(visitor_id, '') LIKE 'verify-%'
+       OR COALESCE(visitor_id, '') LIKE 'probe-%'
+       OR COALESCE(visitor_id, '') LIKE 'story-demo-%')`;
 
 /**
  * 「按时完成」判定：首站到末站的打卡时间差 ≤ 预估用时 × 1.5。
  * 预留 50% 余量——用户要读线索、要操作界面，不能按理想直线时间卡。
  *
  * 放在模块层级并导出：路由层签证书与仓储层落库必须是同一个口径
- * （旧实现两边都无条件发加分，证书分数恒为 150，与耗时无关）。
+ * （旧实现两边都无条件发加分，证书恒 150，与耗时无关）。
  */
 export function finishedUnderTime(quest) {
   const times = (quest.checkins ?? [])
@@ -57,6 +67,23 @@ export function finishedUnderTime(quest) {
   const elapsedMin = (times[times.length - 1] - times[0]) / 60000;
   const budgetMin = (quest.estimatedMinutes ?? quest.estimated_minutes ?? 0) * 1.5;
   return budgetMin > 0 && elapsedMin <= budgetMin;
+}
+
+/**
+ * 任务评分：基础分 + 全部完成 + 按时完成。
+ *
+ * 🔴 唯一实现（2026-11-23 收敛）：证书分数（routes/guide.js 签证书时用）与
+ *    库里的 score（completeQuest 落库时用）必须是同一个数。早期两份实现各写一遍，
+ *    改动其中一处就会让「证书显示的分数 ≠ 库里存的分数」——而证书的卖点恰恰是
+ *    「可复算核验」，数字对不上比没有加分更伤。现在统一从这里出。
+ */
+export function computeQuestScore(quest) {
+  let score = quest.scoring?.base ?? 100;
+  for (const bonus of quest.scoring?.bonuses ?? []) {
+    if (bonus.key === 'all_checkpoints') score += bonus.points;
+    if (bonus.key === 'under_time' && finishedUnderTime(quest)) score += bonus.points;
+  }
+  return score;
 }
 
 export function createOrderRepository({ file = 'data/orders.db' } = {}) {
@@ -224,6 +251,18 @@ export function createOrderRepository({ file = 'data/orders.db' } = {}) {
 
   const now = () => new Date().toISOString();
 
+  /**
+   * 本进程「正在生成资源」的订单 → 在途任务。
+   *
+   * 为什么需要它：数据库里的 PENDING_CONFIRM + 无 service_result 有两种含义——
+   *   ① 上一个进程在「抢占之后、落库之前」崩了（真孤儿，该释放重抢）；
+   *   ② 同一进程里另一个请求正在生成（在途，该等待复用）。
+   *   只看数据库分不清这两者。没有这张表，② 会被当成 ① 处理：
+   *   并发重复 Payment-Proof 会各自释放再抢回抢占权，生成 N 份资源、
+   *   各拿到不同内容——「幂等履约」名存实亡（2026-11-23 并发测试复现）。
+   */
+  const generating = new Map();
+
   /** 落库是 JSON 字符串，出库统一还原为对象 */
   const parseServiceResult = (raw) => {
     if (raw === null || raw === undefined) return null;
@@ -233,6 +272,39 @@ export function createOrderRepository({ file = 'data/orders.db' } = {}) {
       return raw;
     }
   };
+
+  /**
+   * 订单行 → 对外对象（驼峰）。
+   *
+   * 🔴 必须是**同步**的行映射（2026-11-23 测试复现的缺陷）：
+   *    `findByTradeNo` 声明为同步方法，早期实现里它委托 async 的
+   *    `findByOutTradeNo`，于是返回的是一个 Promise。而 routes/guide.js 的
+   *    幂等重放短回路是**不 await** 地用它的——`existing.orderStatus` 取到的是
+   *    undefined，短回路条件恒为 false，整段「本地记录直接交付」的逻辑变成死代码。
+   *    后果（实测）：① 每次合法重放都再打一次远程验付（沙箱偶发非标准响应，
+   *    抖动直接被放大成用户可见的失败）；② 多额度买家每重放一次就被
+   *    grantEntitlementForOrder 多扣 1 次额度（买 10 次送 3 次重放 = 只剩 6 次）。
+   *    现在映射逻辑抽成同步函数，两个查询方法共用，字段口径保持一致。
+   */
+  const mapOrderRow = (row) => ({
+    outTradeNo: row.out_trade_no,
+    amount: row.amount,
+    currency: row.currency,
+    resourceId: row.resource_id,
+    goodsName: row.goods_name,
+    tier: row.tier,
+    payBefore: row.pay_before,
+    orderStatus: row.order_status,
+    fulfillStatus: row.fulfill_status,
+    tradeNo: row.trade_no,
+    visitorId: row.visitor_id,
+    refCode: row.ref_code,
+    source: row.source,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    // 落库存 JSON 字符串，出库统一还原为对象，保证调用方拿到的类型恒定
+    serviceResult: parseServiceResult(row.service_result),
+  });
 
   const insertOrder = db.prepare(`
     INSERT INTO orders (
@@ -245,6 +317,7 @@ export function createOrderRepository({ file = 'data/orders.db' } = {}) {
   `);
 
   const selectOrder = db.prepare('SELECT * FROM orders WHERE out_trade_no = ?');
+  const selectOrderByTradeNo = db.prepare('SELECT * FROM orders WHERE trade_no = ?');
 
   const claimFulfillment = db.prepare(`
     UPDATE orders
@@ -320,25 +393,7 @@ export function createOrderRepository({ file = 'data/orders.db' } = {}) {
     async findByOutTradeNo(outTradeNo) {
       const row = selectOrder.get(outTradeNo);
       if (!row) return null;
-      return {
-        outTradeNo: row.out_trade_no,
-        amount: row.amount,
-        currency: row.currency,
-        resourceId: row.resource_id,
-        goodsName: row.goods_name,
-        tier: row.tier,
-        payBefore: row.pay_before,
-        orderStatus: row.order_status,
-        fulfillStatus: row.fulfill_status,
-        tradeNo: row.trade_no,
-        visitorId: row.visitor_id,
-        refCode: row.ref_code,
-        source: row.source,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        // 落库存 JSON 字符串，出库统一还原为对象，保证调用方拿到的类型恒定
-        serviceResult: parseServiceResult(row.service_result),
-      };
+      return mapOrderRow(row);
     },
 
     /**
@@ -363,33 +418,65 @@ export function createOrderRepository({ file = 'data/orders.db' } = {}) {
         return { state: 'PENDING_CONFIRM', serviceResult: order.serviceResult };
       }
 
-      const claimed = claimFulfillment.run(now(), outTradeNo).changes > 0;
+      let claimed = claimFulfillment.run(now(), outTradeNo).changes > 0;
       if (!claimed) {
+        // 🔴 同进程已有人在这笔订单上生成 → 直接复用它的在途任务，
+        //    不要走下面的「崩溃孤儿」分支（2026-11-23 并发测试复现的缺陷）。
+        //    孤儿判定只看数据库状态，分不清「上一个进程崩了」和「隔壁请求
+        //    还在生成」——旧实现在这里把在途抢占权释放掉再抢回来，
+        //    并发下 N 个重复 Payment-Proof 会生成 N 次资源，
+        //    且每个调用方各拿到**不同**的交付内容（幂等履约被打破）。
+        const inflight = generating.get(outTradeNo);
+        if (inflight) return inflight;
+
         const current = await this.findByOutTradeNo(outTradeNo);
         if (current?.serviceResult) {
           return { state: current.fulfillStatus, serviceResult: current.serviceResult };
         }
-        throw new Error(`FULFILLMENT_CLAIM_FAILED: ${outTradeNo}`);
+        // 🔴 崩溃恢复（2026-11-23 遍历审查发现）：PENDING_CONFIRM 但资源未持久化 =
+        //    孤儿状态——进程在「抢占之后、资源落库之前」崩溃（2026-11-22 部署事故的
+        //    崩溃循环正好会制造这种订单）。不处理的话该订单**永久砖死**：
+        //    重抢条件只匹配 UNFULFILLED（必然失败），又没有结果可返回，
+        //    之后每一次重试都抛 FULFILLMENT_CLAIM_FAILED。释放孤儿状态后重抢。
+        //    能走到这里说明 generating 里没有在途任务，才可能是真孤儿。
+        if (current?.fulfillStatus === 'PENDING_CONFIRM') {
+          releaseFulfillment.run(now(), outTradeNo);
+          claimed = claimFulfillment.run(now(), outTradeNo).changes > 0;
+        }
+        if (!claimed) {
+          throw new Error(`FULFILLMENT_CLAIM_FAILED: ${outTradeNo}`);
+        }
       }
 
-      let generated;
+      // 抢占成功 → 登记在途任务。整段「抢占 + 登记」之间没有 await，
+      // 因此对同一进程内的其它调用是原子的：后来者只会在 claimFulfillment
+      // 失败后看到这个登记项，进而复用它。
+      const task = (async () => {
+        let generated;
+        try {
+          generated = await createResource();
+        } catch (err) {
+          releaseFulfillment.run(now(), outTradeNo);
+          throw err;
+        }
+
+        const serviceResult = JSON.stringify(generated.serviceResult);
+        const usage = generated.usage ?? [];
+
+        const persist = db.transaction(() => {
+          storeServiceResult.run({ outTradeNo, serviceResult, updatedAt: now() });
+          this.recordUsage({ outTradeNo, usage });
+        });
+        persist();
+
+        return { state: 'PENDING_CONFIRM', serviceResult: generated.serviceResult };
+      })();
+      generating.set(outTradeNo, task);
       try {
-        generated = await createResource();
-      } catch (err) {
-        releaseFulfillment.run(now(), outTradeNo);
-        throw err;
+        return await task;
+      } finally {
+        generating.delete(outTradeNo);
       }
-
-      const serviceResult = JSON.stringify(generated.serviceResult);
-      const usage = generated.usage ?? [];
-
-      const persist = db.transaction(() => {
-        storeServiceResult.run({ outTradeNo, serviceResult, updatedAt: now() });
-        this.recordUsage({ outTradeNo, usage });
-      });
-      persist();
-
-      return { state: 'PENDING_CONFIRM', serviceResult: generated.serviceResult };
     },
 
     /** 履约回执成功后标记完成。 */
@@ -419,11 +506,18 @@ export function createOrderRepository({ file = 'data/orders.db' } = {}) {
       db.prepare("UPDATE orders SET source = 'demo' WHERE out_trade_no = ?").run(outTradeNo);
     },
 
-    /** 按交易号查订单（幂等重放走本地记录的短回路；字段口径与 findByOutTradeNo 一致） */
+    /**
+     * 按交易号查订单（幂等重放走本地记录的短回路；字段口径与 findByOutTradeNo 一致）。
+     *
+     * 🔴 同步方法，**不得**委托 async 的 findByOutTradeNo（2026-11-23 修复）：
+     *    调用方 routes/guide.js 的短回路不 await 它，返回 Promise 会让
+     *    `existing.orderStatus === 'PAID'` 恒为 false、整段重放保护失效，
+     *    进而造成「多额度买家每重放一次多扣 1 次额度」的真实资损。
+     */
     findByTradeNo(tradeNo) {
       if (!tradeNo) return null;
-      const row = db.prepare('SELECT out_trade_no FROM orders WHERE trade_no = ?').get(tradeNo);
-      return row ? this.findByOutTradeNo(row.out_trade_no) : null;
+      const row = selectOrderByTradeNo.get(tradeNo);
+      return row ? mapOrderRow(row) : null;
     },
 
     /* ────────────── 权益额度台账 ────────────── */
@@ -493,7 +587,11 @@ export function createOrderRepository({ file = 'data/orders.db' } = {}) {
       refundEntitlementStmt.run({ id });
     },
 
-    /** 访客的额度余额（看板与前端展示用） */
+    /** 访客的额度余额（看板与前端展示用）。
+     *  🔴 过期台账不进余额合计（2026-11-23 遍历审查发现）：消费路径
+     *     `consumeEntitlement` 会跳过过期台账，但旧实现的 granted/used/remaining
+     *     把过期行也加进去——用户「看着有余额却花不了」（两边口径不一致，实测复现）。
+     *     过期行仍在 entitlements 数组里逐条展示（带 expired 标记），只是不计入合计。 */
     entitlementBalance(visitorId) {
       const empty = { granted: 0, used: 0, remaining: 0, entitlements: [] };
       if (!visitorId) return empty;
@@ -509,22 +607,28 @@ export function createOrderRepository({ file = 'data/orders.db' } = {}) {
         expiresAt: row.expires_at,
         expired: row.expires_at ? Date.parse(row.expires_at) <= nowMs : false,
       }));
-      const granted = entitlements.reduce((s, e) => s + e.quota, 0);
-      const used = entitlements.reduce((s, e) => s + e.used, 0);
+      const activeRows = entitlements.filter((e) => !e.expired);
+      const granted = activeRows.reduce((s, e) => s + e.quota, 0);
+      const used = activeRows.reduce((s, e) => s + e.used, 0);
       return { granted, used, remaining: Math.max(0, granted - used), entitlements };
     },
 
     /**
      * 订单侧近 7 天汇总（周维度，呼应官方热度榜的周榜节奏）。
      * 与 orderStatsByVisitor 的区别：不带归因维度，只看时间窗。
+     *
+     * 🔴 paid / paid_real 是**去重访客数**（2026-11-23 修正，与 funnel 口径对齐）：
+     *    旧实现是订单数（COUNT(*)），而前端把 w.paid 与 w.visitors（新访客数）
+     *    并列展示，一个买家下 3 单就会出现「3 付费 / 2 新访客」的倒挂。
+     *    revenue 仍是订单金额合计——钱不能按人去重。
      */
     orderStatsWeekly() {
       const since = new Date(Date.now() - 7 * 86400_000).toISOString();
       return db
         .prepare(`
-          SELECT COUNT(*) AS paid,
-                 SUM(CASE WHEN NOT ${SELF_TEST_SQL} THEN 1 ELSE 0 END) AS paid_real,
-                 CAST(SUM(CASE WHEN order_status = 'PAID' AND refund_status != 'REFUNDED'
+          SELECT COUNT(DISTINCT visitor_id) AS paid,
+                 COUNT(DISTINCT CASE WHEN NOT ${SELF_TEST_SQL} THEN visitor_id END) AS paid_real,
+                 CAST(SUM(CASE WHEN refund_status != 'REFUNDED'
                                THEN CAST(amount AS REAL) ELSE 0 END) AS REAL) AS revenue
           FROM orders
           WHERE order_status = 'PAID' AND created_at >= ?
@@ -648,15 +752,12 @@ export function createOrderRepository({ file = 'data/orders.db' } = {}) {
       const done = quest.checkins.length === quest.checkpoints.length;
       if (!done) return quest;
 
-      let score = quest.scoring.base ?? 100;
-      for (const bonus of quest.scoring.bonuses ?? []) {
-        if (bonus.key === 'all_checkpoints') score += bonus.points;
-        // 🔴 「按时完成」必须真的看时间：旧实现对 under_time 只检查
-        //    estimatedMinutes > 0 就无条件发加分——证书分数恒为 150，
-        //    与用户实际耗时无关，评委核验证书时会发现这个奖励从未被验证（实测复现）。
-        //    口径：首站到末站的打卡时间差 ≤ 预估用时 × 1.5（留 50% 余量给看线索的时间）。
-        if (bonus.key === 'under_time' && finishedUnderTime(quest)) score += bonus.points;
-      }
+      // 🔴 「按时完成」必须真的看时间：旧实现对 under_time 只检查
+      //    estimatedMinutes > 0 就无条件发加分——证书分数恒为 150，
+      //    与用户实际耗时无关，评委核验证书时会发现这个奖励从未被验证（实测复现）。
+      //    口径：首站到末站的打卡时间差 ≤ 预估用时 × 1.5（留 50% 余量给看线索的时间）。
+      //    分数走唯一的 computeQuestScore，与证书里的分数同源。
+      const score = computeQuestScore(quest);
 
       db.prepare(
         `UPDATE quests SET status = 'COMPLETED', score = ?, certificate = ?, completed_at = ? WHERE id = ?`,
@@ -699,7 +800,9 @@ export function createOrderRepository({ file = 'data/orders.db' } = {}) {
         orders: orders.n,
         paid: paid.n,
         paidReal: paidReal.n,
-        revenueCny: revenue.total,
+        // 金额统一在服务端收敛到两位小数：SQLite 的 SUM(CAST(amount AS REAL))
+        // 会带出 0.8300000000000001 这类浮点尾巴，页面与 API 消费者都不该拿到它。
+        revenueCny: Math.round(Number(revenue.total || 0) * 100) / 100,
         usage,
       };
     },
@@ -837,15 +940,12 @@ export function createOrderRepository({ file = 'data/orders.db' } = {}) {
           .get(outTradeNo);
         if (ownLedger) {
           db.prepare('UPDATE entitlements SET quota = used WHERE id = ?').run(ownLedger.id);
-        } else {
-          // 单次退款：把这笔交付消耗的 1 次还回去（找最早一条 used>0 的未过期台账）
-          for (const row of selectEntitlementsStmt.all(visitorId)) {
-            if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) continue;
-            if (row.used <= 0) continue;
-            const changed = refundEntitlementStmt.run({ id: row.id }).changes;
-            if (changed > 0) break;
-          }
         }
+        // 🔴 其他档位（single/trial/quest）**不动任何台账**（2026-11-23 遍历审查修正）：
+        //    单次直付订单的交付根本没走权益台账（quota≤1 不发台账）——旧实现在这里
+        //    「找最早一条 used>0 的台账还 1 次」，等于给恰好持有十次包的退款访客
+        //    白送一次额度（实测路径推演复现）。台账只该在「额度真的被这笔订单
+        //    消耗过」时才回补，而这样的订单只有整包自己（上面 ownLedger 分支）。
 
         db.prepare(
           'INSERT INTO refund_tickets (out_trade_no, visitor_id, amount, reason, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
