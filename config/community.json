@@ -1,0 +1,9 @@
+{
+  "_comment": "社区传播配置。officialWorkUrl = 支付宝 AI 付官网上的『作品详情页』地址。",
+  "_why": "官方细则原文：『作品影响力 20% = 参赛作品详情页在支付宝 AI 付官网的浏览、点赞、评论等互动量综合评定』。⇒ 我们自己站的 PV 不计入影响力；每一次买家把核验卡/收据分享出去，都是一次把潜在用户引到官方作品页的机会（同时也正好是一次真实付费用户 → 商业化 25%）。这个 URL 在作品提交并审核通过后才有，故留空；提交当天填上并重启即可生效，核验卡与收据会自动带上链接与二维码。",
+  "_format": "形如 https://aipay.alipay.com/community?view=work%2F<作品ID>",
+  "officialWorkUrl": "",
+  "officialWorkTitle": "三维问路 · SceneGuide（支付宝 AI 付黑客松参赛作品）",
+  "officialWorkCta": "去支付宝 AI 付官网看作品，顺手点个赞、留条评论",
+  "officialWorkNote": "这届黑客松的『作品影响力』按官方作品页上的浏览、点赞、评论统计。"
+}

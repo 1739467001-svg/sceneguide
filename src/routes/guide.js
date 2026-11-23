@@ -17,6 +17,7 @@ import { createMcpHandler } from '../mcp/server.js';
 // 证书里的分数与库里的 score 必须同源，否则「可复算核验」的卖点不成立。
 import { computeQuestScore } from '../orders/repository.js';
 import { hashIp } from '../analytics/store.js';
+import { getOfficialWork } from '../community.js';
 
 /**
  * 付费资源路由 —— A2M 智能收（HTTP 402）核心控制流。
@@ -934,6 +935,10 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
       usage: result.billing ?? null,
       fulfilled_at: order.updatedAt ?? null,
       cta: { message: '我也要问', url: '/?ref=share' },
+      // 官方作品页（影响力 20% 只统计那个页面上的浏览/点赞/评论）
+      // → 买家把核验卡/收据分享出去时，顺手把官方作品页带出去。
+      //    未配置时为 null，前端不渲染这一块（优雅降级，不影响核验卡本身）。
+      official: await getOfficialWork(),
     });
   });
 

@@ -746,6 +746,29 @@ else
   tail -5 /tmp/sg-render.log | sed 's/^/      /'
 fi
 
+# ── 21. 官方作品页分享链路（影响力 20% 的落点）────────────
+# 官方细则：「作品影响力 = 参赛作品详情页在支付宝 AI 付官网的浏览、点赞、评论」。
+# ⇒ 核验卡/收据必须能把买家引到官方作品页，否则 20% 引不到落点。
+step "21. 官方作品页分享链路（核验卡/收据 → 官方作品页）"
+if node "$SCRIPT_DIR/verify-community-share.mjs" > /tmp/sg-community.log 2>&1; then
+  ok "官方作品页分享链路通过（模块降级 / 二维码 / 接口接线 / 前端渲染 / 配置提醒，见 scripts/verify-community-share.mjs）"
+else
+  bad "官方作品页分享链路存在失败项（node scripts/verify-community-share.mjs 查看详情）"
+  grep '✗' /tmp/sg-community.log | sed 's/^/      /'
+fi
+
+# ── 22. Shell 脚本 Unicode 变量名（这个坑咬过我们两次）────────
+# bash 会把 $VAR 后面紧跟的多字节字符并进变量名；脚本一开 set -u 就报
+# 「unbound variable」，而且常常恰好炸在**出错分支**上（报错语句自己崩）。
+# 检测器自带自检：先真的复现一次，确认它抓得到，再信它的绿灯。
+step "22. Shell 脚本 Unicode 变量名检测"
+if node "$SCRIPT_DIR/verify-shell-unicode.mjs" > /tmp/sg-shell-unicode.log 2>&1; then
+  ok "Shell 脚本无「\$变量后紧跟非 ASCII」问题（检测器已自检，见 scripts/verify-shell-unicode.mjs）"
+else
+  bad "Shell 脚本存在 Unicode 变量名问题（node scripts/verify-shell-unicode.mjs 查看详情）"
+  grep '✗' /tmp/sg-shell-unicode.log | sed 's/^/      /'
+fi
+
 # ── 汇总 ────────────────────────────────────────────────────
 printf '\n%s\n' "────────────────────────────────────────────────────────"
 if [[ $FAIL -eq 0 ]]; then

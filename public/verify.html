@@ -34,9 +34,23 @@
   .cta-row .cta { flex:1; }
   .cta-ghost { display:block; text-align:center; background:var(--card); border:1px solid var(--border); color:var(--dim); text-decoration:none; font-weight:600; font-size:13px; padding:12px; border-radius:11px; cursor:pointer; font-family:inherit; }
   .cta-ghost:hover { color:var(--text); border-color:rgba(255,255,255,.24); }
-  .foot { margin-top:16px; text-align:center; font-size:11.5px; color:var(--faint); }
-  .err { text-align:center; padding:30px 0 10px; color:var(--dim); font-size:14px; line-height:1.8; }
-  .num { font-variant-numeric:tabular-nums; }
+    .foot { margin-top:16px; text-align:center; font-size:11.5px; color:var(--faint); }
+    .err { text-align:center; padding:30px 0 10px; color:var(--dim); font-size:14px; line-height:1.8; }
+    .num { font-variant-numeric:tabular-nums; }
+
+    /* ── 官方作品页分享块（影响力 20% 的落点）── */
+    .official { margin-top:18px; padding:16px; border-radius:13px; display:flex; gap:14px; align-items:center;
+      background:linear-gradient(135deg, rgba(47,123,255,.12), rgba(34,211,166,.08));
+      border:1px solid rgba(63,140,255,.28); }
+    .official .qr { flex:none; width:96px; height:96px; background:#fff; border-radius:6px; padding:8px;
+      display:grid; place-items:center; overflow:hidden; }
+    .official .qr svg { width:100%; height:100%; display:block; }
+    .official .ot { font-size:13.5px; font-weight:700; line-height:1.5; margin-bottom:5px; }
+    .official .on { font-size:12px; color:var(--dim); line-height:1.6; margin-bottom:9px; }
+    .official .ol { font-size:11.5px; color:var(--faint); word-break:break-all; font-family:ui-monospace,Menlo,Consolas,monospace; }
+    .official .olink { display:inline-block; margin-top:9px; font-size:13px; font-weight:600; color:#9fd0ff; text-decoration:none;
+      border:1px solid rgba(63,140,255,.35); border-radius:9px; padding:7px 13px; }
+    .official .olink:hover { filter:brightness(1.15); }
 
   /* ── 收据打印态：白纸黑字 + 双线框，其余一律隐藏 ── */
   #receiptCard { display:none; }
@@ -113,6 +127,7 @@
               完整路线内容仍属付费交付——核验的是「这笔交易真实发生」，不是内容本身。
             </div>
             <a class="cta" href="./?ref=share">${esc(j.cta?.message ?? '我也要问')}</a>
+            ${officialBlock(j.official)}
             <div class="cta-row">
               <button type="button" class="cta-ghost" id="receiptBtn">打印收据（可报销留档）</button>
             </div>
@@ -120,6 +135,46 @@
           bindReceiptButton(j);
         })
         .catch(() => $('<div class="err">核验服务暂时不可用，请稍后再试。</div>'));
+    }
+
+    /**
+     * 官方作品页分享块。
+     *
+     * 为什么在核验卡上放这个（2026-11-24 核实官方细则后新增）：
+     *   官方《活动细则》：「作品影响力 20% = 参赛作品详情页在支付宝 AI 付官网的
+     *   浏览、点赞、评论等互动量综合评定」——**我们自己站的流量不计入**。
+     *   买家愿意晒的恰恰就是这张核验卡/收据 ⇒ 把它变成一个「引流到官方作品页」的载体，
+     *   一次分享同时喂养商业化分（真人付费）与影响力分（官方页浏览/点赞/评论）。
+     *
+     *   服务端未配置官方作品页 URL 时（提交并审核通过前）整块不渲染 —— 优雅降级。
+     */
+    function officialBlock(o) {
+      if (!o || !o.url) return '';
+      const qr = o.qrSvg
+        ? `<div class="qr" aria-label="官方作品页二维码">${o.qrSvg}</div>`
+        : '';
+      return `
+        <div class="official">
+          ${qr}
+          <div>
+            <div class="ot">${esc(o.title ?? '')}</div>
+            <div class="on">${esc(o.note ?? '')}${o.note ? '<br/>' : ''}${esc(o.cta ?? '')}</div>
+            <div class="ol">${esc(o.url)}</div>
+            <a class="olink" href="${esc(o.url)}" target="_blank" rel="noopener noreferrer">打开作品页 →</a>
+          </div>
+        </div>`;
+    }
+
+    /** 收据打印版里的官方作品页行（白底二维码，保证打印可扫） */
+    function receiptOfficial(o) {
+      if (!o || !o.url) return '';
+      const qr = o.qrSvg
+        ? `<div style="display:inline-block;background:#fff;border:1px solid #bbb;border-radius:4px;padding:3px;margin:4px 6px 0 0;vertical-align:top">${o.qrSvg}</div>`
+        : '';
+      return `<div style="margin-top:10px;border-top:1px dotted #bbb;padding-top:8px">
+        ${qr}<span style="font-size:11px;color:#444">支付宝 AI 付黑客松参赛作品：<br/>
+        <span style="font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all">${esc(o.url)}</span><br/>
+        ${esc(o.note ?? '')}${esc(o.cta ?? '')}</span></div>`;
     }
 
     /** 打印收据：同一份核验数据排成正式收据版式，打印时整页只留它 */
@@ -150,6 +205,7 @@
             本收据由商家服务端基于真实履约记录出具：证据哈希覆盖真实路网拓扑的节点与边，任何人可复算；
             交易号已脱敏，不含任何个人信息。完整路线内容仍属付费交付——核验的是「这笔交易真实发生」，不是内容本身。<br/>
             支付通道：支付宝 AI 付 A2M 智能收（HTTP 402 按量付费）｜ 场景数据 © OpenStreetMap contributors (ODbL)
+            ${receiptOfficial(j.official)}
           </div>
         </div>`;
         document.body.classList.add('printing-receipt');

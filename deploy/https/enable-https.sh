@@ -60,7 +60,10 @@ if nginx -t; then
   systemctl reload nginx
   echo "✅ HTTPS 已启用：https://$DOMAIN/sceneguide/"
 else
-  echo "✗ nginx -t 未通过，已回滚（删除 $TARGET）" >&2
+  # ⚠️ 必须写 ${TARGET} 而不是 $TARGET）：紧跟全角「）」时 bash 会把「）」并进变量名，
+  #    变成未定义变量 $TARGET）——在 set -u 下这条**回滚分支自己会崩**，
+  #    而它恰恰是出错时最该说清楚话的那一行。由 scripts/verify-shell-unicode.mjs 守。
+  echo "✗ nginx -t 未通过，已回滚（删除 ${TARGET}）" >&2
   rm -f "$TARGET"
   exit 1
 fi
