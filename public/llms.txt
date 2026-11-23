@@ -15,7 +15,7 @@
 - 代码仓库（MIT）: https://github.com/1739467001-svg/sceneguide
 - MCP 发现端点: POST https://121.43.80.231/sceneguide/mcp
   （JSON-RPC 2.0；`tools/list` 暴露 `scene_guide`[annotations.paid=true] 与 `scene_guide_scenes`）
-- 验收: `BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh`（76 项，含真实支付）
+- 验收: `BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh`（77 项，含真实支付）
 
 ## 计费
 
@@ -75,7 +75,7 @@ Base64URL 作为 `payment_proof` 参数重新调用即可。已购额度的 Agen
 ## 验收（不必相信本文件）
 
 ```bash
-BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh   # 76 项：402 全链路 / 幂等 / 额度 / 打卡 / 归因 / 深层 404
+BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh   # 77 项：402 全链路 / 幂等 / 额度 / 打卡 / 归因 / 深层 404
 node scripts/verify-mcp-flow.mjs      # 21 项：Agent 路径 tools/list → 402 → 沙箱收银 → 交付 → 幂等重放
 node scripts/verify-account-flow.mjs  # 17 项：买家路径 买包 → 转赠 → 兑换 → 余额交付 → 撤销 → 退款回收
 ```
