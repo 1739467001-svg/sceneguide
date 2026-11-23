@@ -12,8 +12,9 @@ PAYATHON 2026 · Machine Pay 赛道
     Chrome 会把 http:// 裸 IP 自动升级为 https://，无 TLS 时会硬拦截成空白错误页，
     故直接给 IP 上 TLS——评委点开链接直达作品，无需任何设置。）
 
-  备选（Safari / Firefox / 内嵌浏览器不会自动升级，可直接用）：
-    http://121.43.80.231/sceneguide/
+  备选（仅降级用；Safari / Firefox / 内嵌浏览器不会自动升级，可直接用）：
+    HTTP 入口 http://121.43.80.231/sceneguide/ ——注意：官方买方工具要求付费资源必须 HTTPS，
+    走这个入口只能用网页方式体验，**不能用官方 AI 付工具下单**。
 
   评委版作品介绍（可打印一页纸）：https://121.43.80.231/sceneguide/introduction.html
   Agent 入口文档（llms.txt）：      https://121.43.80.231/sceneguide/llms.txt
@@ -22,7 +23,7 @@ PAYATHON 2026 · Machine Pay 赛道
 二、三条命令自行验证（不必相信任何描述）
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  # ① 全量验收：79 项（含真实支付宝沙箱收银）
+  # ① 全量验收：82 项（含真实支付宝沙箱收银）
   BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh
 
   # ② Agent 路径端到端：tools/list → 402 → 沙箱收银 → 交付 → 幂等重放（21 项）
@@ -69,6 +70,6 @@ PAYATHON 2026 · Machine Pay 赛道
 
   作品介绍文档.pdf        评委版一页说明书（4 页，含架构图）
   演示视频-…-20261120.mp4  52 秒录屏：试看 → 402 → 真实沙箱支付 → 三维路线 →
-                          研学打卡 → 79 项验收 → 机构采购 → 我的账户
+                          研学打卡 → 82 项验收 → 机构采购 → 我的账户
   验收说明.txt            本文件
   说明.txt                评审须知（无凭据需求 / 无邀请码 / 口径与边界）

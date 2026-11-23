@@ -44,7 +44,14 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
   /** 演示代付按 IP 的每日上限（沙箱接口真实出账，防刷爆）。
    *  可用 DEMO_PAY_DAILY_IP_LIMIT 覆盖（运维旋钮：本地反复跑验收脚本时调高，
    *  生产部署保持默认 100）。 */
-  const DEMO_PAY_DAILY_IP_LIMIT = Number(process.env.DEMO_PAY_DAILY_IP_LIMIT ?? 100);
+  // 日上限：默认 500（原 100）。
+  // ⚠️ 为什么放宽：原值 100 在**校园 NAT 共享出口 IP** 的评审场景下会误伤——
+  //   几十位评委共用一个公网 IP，累计演示支付很快触顶 → 现场点不动。
+  //   沙箱支付是 mock（无真实资金），日上限的主要作用是防滥用，不是防成本；
+  //   真正的瞬时刷爆交给下面的分钟级闸门。
+  const DEMO_PAY_DAILY_IP_LIMIT = Number(process.env.DEMO_PAY_DAILY_IP_LIMIT ?? 500);
+  // 分钟级突发上限：单机高频刷爆（分钟上百次）立刻被拦，正常评审远低于此。
+  const DEMO_PAY_MINUTE_IP_LIMIT = Number(process.env.DEMO_PAY_MINUTE_IP_LIMIT ?? 60);
   /** 权益额度有效期（天）：多额度商品发放的次数余额在多久内有效 */
   const ENTITLEMENT_VALID_DAYS = 90;
 
@@ -54,6 +61,14 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
     const ipHash = hashIp(req.ip ?? req.socket?.remoteAddress);
     if (!ipHash) return null;
     return analytics.bumpIpDaily(ipHash, type);
+  }
+
+  /** 分钟级突发计数（与 ipLimit 同口径，键为 ip_hash + 分钟 + 类型） */
+  function ipMinuteLimit(req, type) {
+    if (!analytics) return null;
+    const ipHash = hashIp(req.ip ?? req.socket?.remoteAddress);
+    if (!ipHash) return null;
+    return analytics.bumpIpMinute(ipHash, type);
   }
 
   function pickTier(req) {
@@ -672,6 +687,13 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
     if (demoCount !== null && demoCount > DEMO_PAY_DAILY_IP_LIMIT) {
       return res.status(429).json({
         error: `今日演示支付次数已达上限（${DEMO_PAY_DAILY_IP_LIMIT}），明天再来。`,
+      });
+    }
+    // 分钟级闸门：挡瞬时刷爆（日闸门挡不住）
+    const demoMinute = ipMinuteLimit(req, 'demo_pay');
+    if (demoMinute !== null && demoMinute > DEMO_PAY_MINUTE_IP_LIMIT) {
+      return res.status(429).json({
+        error: `演示支付过于频繁（每分钟上限 ${DEMO_PAY_MINUTE_IP_LIMIT}），请稍候再试。`,
       });
     }
 

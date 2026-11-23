@@ -28,7 +28,7 @@ export function hashIp(ip) {
   return crypto.createHash('sha256').update(`${IP_SALT}:${ip}`).digest('hex').slice(0, 24);
 }
 
-export function createAnalyticsStore({ file = 'data/analytics.db' } = {}) {
+export function createAnalyticsStore({ file = process.env.SG_ANALYTICS_DB || 'data/analytics.db' } = {}) {
   const dbFile = path.isAbsolute(file) ? file : path.resolve(process.cwd(), file);
   fs.mkdirSync(path.dirname(dbFile), { recursive: true });
 
@@ -79,6 +79,13 @@ export function createAnalyticsStore({ file = 'data/analytics.db' } = {}) {
     CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
 
     -- 按 IP 的每日限流计数（公网部署后的防刷层；cookie 可重置，IP 哈希不可）
+    CREATE TABLE IF NOT EXISTS ip_minute (
+      ip_hash  TEXT NOT NULL,
+      minute   TEXT NOT NULL,
+      type     TEXT NOT NULL,
+      count    INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (ip_hash, minute, type)
+    );
     CREATE TABLE IF NOT EXISTS ip_daily (
       ip_hash TEXT NOT NULL,
       day     TEXT NOT NULL,
@@ -155,6 +162,17 @@ export function createAnalyticsStore({ file = 'data/analytics.db' } = {}) {
     /** 库体检（/healthz 与 scripts/db-check.mjs 用）：返回 'ok' 或损坏描述 */
     quickCheck() {
       return db.pragma('quick_check', { simple: true });
+    },
+
+    /**
+     * 关闭库连接。
+     *
+     * 与订单库同口径：优雅关闭（SIGINT/SIGTERM）时释放连接并把 WAL 检查点收尾，
+     * 否则容器重启/发布时留下 -wal/-shm 残留，下次启动要靠 SQLite 自己恢复。
+     * server.js 的 shutdown 里与 repository.close() 成对调用。
+     */
+    close() {
+      db.close();
     },
 
     /** 注册渠道码（幂等） */
@@ -260,16 +278,50 @@ export function createAnalyticsStore({ file = 'data/analytics.db' } = {}) {
     /**
      * 按 IP 的每日限流：原子自增并返回新计数。
      * 公网部署后 cookie 可被随意重置，防刷必须落到 IP 哈希上。
+     *
+     * 🔴 「日」的边界必须与 countTodayEvents 一致（本地日，2026-11-23 修正）：
+     *    旧实现用 `new Date().toISOString().slice(0,10)`（UTC 日）。对 UTC+8 的
+     *    主要受众，UTC 日界 = 北京时间早 8 点——于是「今日免费试看」的访客额度
+     *    按本地日重置，而 IP 兜底额度按 UTC 日重置，两条限流的「今日」不是同一个
+     *    今日：00:00–08:00 之间 IP 计数会被提前清零，同一刷子能多拿一整轮配额。
+     *    countTodayEvents 用 `setHours(0,0,0,0)`（本地日），这里向它对齐。
      */
     bumpIpDaily(ipHash, type) {
-      const day = new Date().toISOString().slice(0, 10);
+      const d = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      // 本地日期键：不能用 toISOString()（东八区本地 0 点的 ISO 串还是前一天）
+      const dayKey = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
       const row = db
         .prepare(`
           INSERT INTO ip_daily (ip_hash, day, type, count) VALUES (?, ?, ?, 1)
           ON CONFLICT(ip_hash, day, type) DO UPDATE SET count = count + 1
           RETURNING count
         `)
-        .get(ipHash, day, type);
+        .get(ipHash, dayKey, type);
+      return row.count;
+    },
+
+    /**
+     * 分钟级突发计数（防瞬时刷爆）。
+     *
+     * 为什么需要：日上限是「一天」的闸门，挡不住「一分钟内打 500 次」的瞬时刷爆；
+     * 但只有日上限又会在**校园 NAT 共享出口 IP** 的评审场景下误伤
+     * （几十位评委共用一个公网 IP，累计次数很快触顶 → 现场点不动）。
+     * 因此日上限放宽、同时用分钟级上限挡瞬时：正常评审（几十人各点几次）远低于分钟上限，
+     * 恶意刷爆（单机高频）则会被分钟闸门立即拦住。
+     */
+    bumpIpMinute(ipHash, type) {
+      const d = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      const minuteKey = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} `
+        + `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      const row = db
+        .prepare(`
+          INSERT INTO ip_minute (ip_hash, minute, type, count) VALUES (?, ?, ?, 1)
+          ON CONFLICT(ip_hash, minute, type) DO UPDATE SET count = count + 1
+          RETURNING count
+        `)
+        .get(ipHash, minuteKey, type);
       return row.count;
     },
 
@@ -498,14 +550,23 @@ export function createAnalyticsStore({ file = 'data/analytics.db' } = {}) {
      *    SQLite 不能跨数据库文件 JOIN —— orders.db 里看不到 visitors 表，
      *    所以在 JS 里按 visitor → 首触渠道 归并。
      *
+     * 🔴 口径（2026-11-23 修正）：漏斗的每一层都是**访客数**，不是订单数。
+     *    旧实现把 `bucket.paid += row.paid`（订单数）直接累加，而分母
+     *    `visitors` 是去重访客数——一个买家下 3 单就让 convPct 冲到 300%，
+     *    看板上出现「付费 > 访客」的自相矛盾数字（本项目卖点恰恰是「所有数字
+     *    可核验」，这种口径错误最伤）。orderStatsByVisitor 一行就是一个访客，
+     *    因此按行计数即可得到去重访客数。
+     *    paidSelfTest / paidReal 做成互斥划分（全自测 vs 有真实单），
+     *    前端「付费 X（真实 Y / 自测 Z）」满足 Y + Z = X。
+     *
      * 口径：
      *   visitors   触达访客（去重）
-     *   previews   免费试看次数
+     *   previews   免费试看次数（事件数，非去重）
      *   challenges 发起支付挑战（创建订单）的访客数
      *   paid       完成支付的访客数（含自测）
-     *   paidReal   其中来源为外部 API 的支付（真实用户口径）
-     *   paidSelfTest  其中来源为演示代付的自测支付
-     *   revenue    累计收入（元）
+     *   paidReal   其中至少有一笔外部 API 真实支付的访客
+     *   paidSelfTest  其中全部支付都来自演示代付自测的访客
+     *   revenue    累计收入（元，订单金额合计）
      *   conv       访客 → 付费 转化率
      */
     funnel(orderStats = [], { weekly = null } = {}) {
@@ -528,7 +589,8 @@ export function createAnalyticsStore({ file = 'data/analytics.db' } = {}) {
         `)
         .all();
 
-      // 订单侧预聚合行 → 按 visitor 的首触渠道归并
+      // 订单侧预聚合行 → 按 visitor 的首触渠道归并。
+      // 一行 = 一个访客，因此这里做的是「按渠道数访客」，不是「按渠道数订单」。
       const refOf = new Map(
         db.prepare('SELECT id, ref_code FROM visitors').all().map((r) => [r.id, r.ref_code]),
       );
@@ -538,11 +600,15 @@ export function createAnalyticsStore({ file = 'data/analytics.db' } = {}) {
         const bucket = byCode.get(code) ?? {
           challenges: 0, paid: 0, revenue: 0, paidSelfTest: 0, paidReal: 0,
         };
-        bucket.challenges += row.challenges;
-        bucket.paid += row.paid;
+        // challenges：发起过至少一笔挑战的访客
+        if (row.challenges > 0) bucket.challenges += 1;
+        // paid：完成过至少一笔支付的访客
+        if (row.paid > 0) bucket.paid += 1;
+        // 收入仍是订单金额合计（钱不能按人去重）
         bucket.revenue += row.revenue;
-        bucket.paidSelfTest += row.paid_selftest;
-        bucket.paidReal += row.paid_real;
+        // 互斥划分：有真实单 → paidReal；全部是自测 → paidSelfTest
+        if (row.paid > 0 && row.paid_real > 0) bucket.paidReal += 1;
+        else if (row.paid > 0 && row.paid_selftest > 0) bucket.paidSelfTest += 1;
         byCode.set(code, bucket);
       }
 

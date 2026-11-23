@@ -11,7 +11,8 @@ PAYATHON 2026 · Machine Pay 赛道
    直接用浏览器访问：https://121.43.80.231/sceneguide/
    已启用 HTTPS（Let's Encrypt 为该 IP 签发的短期证书），Chrome / Edge / Safari /
    Firefox 均可直接打开。若您的浏览器仍提示"不安全"，请改用
-   http://121.43.80.231/sceneguide/ （功能完全相同）。
+   HTTP 入口 http://121.43.80.231/sceneguide/ （功能完全相同，但仅降级用——
+   官方 AI 付工具要求付费资源必须 HTTPS，走该入口无法用官方工具下单）。
 
 3. **支付是真实可操作的**
    演示运行在支付宝沙箱环境，点一下支付按钮会真实走一遍沙箱收银接口
@@ -19,7 +20,7 @@ PAYATHON 2026 · Machine Pay 赛道
    待生产 service_id 审核通过后自动生效。
 
 4. **三条命令可独立复核**
-   BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh   # 78 项
+   BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh   # 82 项
    node scripts/verify-mcp-flow.mjs                                  # 21 项
    node scripts/verify-account-flow.mjs                              # 17 项
 
