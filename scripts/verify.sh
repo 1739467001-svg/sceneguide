@@ -610,6 +610,23 @@ LEAD_LONG=$("${CURL[@]}" -X POST "$BASE/api/v1/leads" -H 'Content-Type: applicat
   -d "{\"org\":\"$(printf 'x%.0s' $(seq 1 100))\",\"contact\":\"y\"}" 2>/dev/null)
 if echo "$LEAD_LONG" | grep -q '60 字以内'; then ok "超长机构名被拒（长度校验）"; else bad "超长未被拒：$LEAD_LONG"; fi
 
+# ── 18.5 冷评委路径（浏览器层，页面级体验）────────────────────
+# 为什么单独有这一节：前面的断言都是**接口级**的，而评委看到的是**页面级**体验——
+# 两者可能同时一个绿一个断（接口全对但按钮点不动、或静态文案让断言误判成已交付）。
+# 这一节用**全新浏览器 profile** 走一遍提交表单「如何获取作品」承诺的 7 步。
+step "18.5 冷评委路径（全新访客走完 7 步）"
+if [[ -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ]]; then
+  if node "$SCRIPT_DIR/judge-flow.mjs" > /tmp/sg-judge-flow.log 2>&1; then
+    JF_N=$(grep -c '✓' /tmp/sg-judge-flow.log || true)
+    ok "冷评委路径全部通过（${JF_N} 项：落地 → 402 挑战 → 支付 → 交付 → 核验卡 → 账户 → 反馈 → 场景切换）"
+  else
+    bad "冷评委路径存在失败项（node scripts/judge-flow.mjs 查看详情）"
+    tail -12 /tmp/sg-judge-flow.log | sed 's/^/      /'
+  fi
+else
+  warn "未检测到本机 Chrome，跳过冷评委路径（本项需要浏览器层）"
+fi
+
 # ── 19. 数据库体检（损坏必须早发现：支付链路会静默变 500）─────────
 step "19. 数据库体检"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
