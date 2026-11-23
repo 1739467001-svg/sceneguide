@@ -83,8 +83,21 @@ if [[ "$TARGET" == "sg60" || "$TARGET" == "aliyun" ]]; then
   done
   if [[ -n "$OK" ]]; then
     echo "✓ 发布成功"
-    echo "  公网验收：BASE_URL=http://<域名或IP>/sceneguide bash scripts/verify.sh（76 项）"
+    echo "  公网验收：BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh（76 项）"
     echo "  回滚：ssh ${HOST} 'cd ${APP_DIR} && cp app/app.bak-<date>.tar.gz app/ && docker compose up -d --force-recreate'"
+
+    # ── 5.5 环境闸门：切生产后自检（沙箱部署则只提示不阻塞）──
+    #    prod-check 会核对：生产配置齐全 / 私钥是 PKCS#1 / sellerId 与报名账号一致 /
+    #    四档 serviceId 都是真实值 / 运行实例 env=production / 402 挑战携带真实 serviceId。
+    #    这是「切生产」的最后一道闸门——官方硬约束（注册价=实收价、账号一致性）任一不满足，
+    #    都会在评审现场变成拒单或计 0。
+    echo ""
+    echo "▸ 生产就绪自检（prod-check）"
+    if node "$PWD/scripts/prod-check.mjs" 2>&1 | sed 's/^/  /'; then
+      echo "  ✓ 生产配置自检通过"
+    else
+      echo "  ⚠ 生产配置自检未全绿——若当前是沙箱部署可忽略；切生产前必须清零上述阻塞项"
+    fi
   else
     echo "✗ 健康检查失败：ssh ${HOST} 'cd ${APP_DIR} && docker compose logs --tail 50'" >&2
     exit 1

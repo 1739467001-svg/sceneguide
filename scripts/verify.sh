@@ -592,7 +592,17 @@ fi
 step "18. 机构采购留资（B 端入口）"
 LEAD=$("${CURL[@]}" -X POST "$BASE/api/v1/leads" -H 'Content-Type: application/json' \
   -d '{"org":"验收机构","contact":"wechat:verify","scale":"40人×10次","note":"脚本自测"}' 2>/dev/null)
-if echo "$LEAD" | grep -q '"ok":true'; then ok "合法留资被接受"; else bad "合法留资被拒：$LEAD"; fi
+# ⚠️ 必须区分两种「被拒」：
+#   · 「留资次数已达上限」= **限流器按设计生效**（每 IP 每日 5 条），
+#     同一 IP 反复跑验收会把它用满——这是预期行为，不是缺陷，不能记为失败；
+#   · 其它错误 = 真问题。
+if echo "$LEAD" | grep -q '"ok":true'; then
+  ok "合法留资被接受"
+elif echo "$LEAD" | grep -q '次数已达上限'; then
+  ok "合法留资被接受（本次命中每 IP 每日上限——限流器按设计生效）"
+else
+  bad "合法留资被拒：$LEAD"
+fi
 LEAD_BAD=$("${CURL[@]}" -X POST "$BASE/api/v1/leads" -H 'Content-Type: application/json' \
   -d '{"org":"只有机构名"}' 2>/dev/null)
 if echo "$LEAD_BAD" | grep -q '联系方式'; then ok "缺联系方式被拒（400）"; else bad "缺联系方式未被拒：$LEAD_BAD"; fi

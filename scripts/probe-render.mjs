@@ -2,7 +2,7 @@
 // 公网页面 3D 初始化探针：收集 console/error + __scene3d 状态
 import { spawn } from 'node:child_process';
 
-const BASE = (process.env.BASE_URL ?? 'http://121.43.80.231/sceneguide/').replace(/\/$/, '');
+const BASE = (process.env.BASE_URL ?? 'https://121.43.80.231/sceneguide/').replace(/\/$/, '');
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 const port = 9750 + Math.floor(Math.random() * 100);
