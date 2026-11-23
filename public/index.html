@@ -494,6 +494,20 @@
         这也是本项目选择按量付费赛道的工程理由之一。
       </div>
 
+      <div class="notice notice-cyan" style="margin-top:12px">
+        <b>官方条款对照（据开放平台《AI收 · 接入准备 / 产品介绍》）：</b>
+        <table class="data" style="margin-top:8px">
+          <tbody>
+            <tr><td style="width:26%"><b>准入</b></td><td>支持企业账号、<b>个人账号</b>、个体工商户——本作品以个人账号主体接入</td></tr>
+            <tr><td><b>费率</b></td><td>单笔 1.0%；<b>个人开发者 2026.4.15–12.31 零费率</b>（本站「个人开发者费率 0%」即源于此）</td></tr>
+            <tr><td><b>结算</b></td><td>默认实时到账商家签约账号的支付宝余额；<b>新签约未满 90 日或连续交易未满 30 日</b>的次日结算，当日资金见「对账中心 › 不可用余额」</td></tr>
+            <tr><td><b>退款</b></td><td>默认交易后 <b>12 个月内可原路退款</b>，退款时服务费一并退回；本站沙箱环境退款接口不可用，故实现为「权益即时回收 + 工单留痕 + 订单标注」，生产环境按官方退款能力执行</td></tr>
+            <tr><td><b>买方前提</b></td><td>用户在支付宝 App 开通 <b>AI 钱包</b>并开启支付功能，智能体方能代其完成付款</td></tr>
+            <tr><td><b>调试环境</b></td><td>官方说明「AI收 产品暂不支持沙箱调试」——本作品使用的是<b>支付宝官方 Skill 提供的匿名沙箱</b>（<code>api_mock_service_id</code> + 官方沙箱收银），正式环境需注册真实 <code>service_id</code> 后切生产</td></tr>
+          </tbody>
+        </table>
+      </div>
+
       <div class="notice" style="margin-top:12px;border-left-color:#22d3a6">
         <b style="color:var(--text)">最硬的一项证据：被支付宝<b>官方买方脚本</b>买通过。</b><br />
         上面这些接口不是我们自己说好使就算数——我们用<b>支付宝官方写的</b>买方脚本

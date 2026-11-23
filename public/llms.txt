@@ -15,7 +15,18 @@
 - 代码仓库（MIT）: https://github.com/1739467001-svg/sceneguide
 - MCP 发现端点: POST https://121.43.80.231/sceneguide/mcp
   （JSON-RPC 2.0；`tools/list` 暴露 `scene_guide`[annotations.paid=true] 与 `scene_guide_scenes`）
-- 验收: `BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh`（78 项，含真实支付）
+- 验收: `BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh`（79 项，含真实支付）
+
+## 官方条款（据开放平台《AI收》产品介绍 / 接入准备）
+
+| 项 | 条款 |
+|---|---|
+| 准入 | 支持企业账号、**个人账号**、个体工商户 |
+| 费率 | 单笔 1.0%；**个人开发者 2026.4.15–12.31 零费率** |
+| 结算 | 默认实时到账商家签约账号的支付宝余额；**新签约未满 90 日或连续交易未满 30 日**次日结算（当日资金见「对账中心 › 不可用余额」） |
+| 退款 | 默认交易后 **12 个月内**可原路退款，退款时**服务费一并退回** |
+| 买方前提 | 用户需在支付宝 App 开通 **AI 钱包**并开启支付功能，Agent 方能代其付款 |
+| 调试 | 官方说明「AI收 产品暂不支持沙箱调试」；本服务当前跑在**官方 Skill 提供的匿名沙箱**（`api_mock_service_id` + 官方沙箱收银），生产需注册真实 `service_id` |
 
 ## 计费
 
@@ -85,7 +96,7 @@ bash scripts/official-buyer-check.sh
 ## 验收（不必相信本文件）
 
 ```bash
-BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh   # 78 项：402 全链路 / 幂等 / 额度 / 打卡 / 归因 / 深层 404
+BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh   # 79 项：402 全链路 / 幂等 / 额度 / 打卡 / 归因 / 深层 404
 node scripts/verify-mcp-flow.mjs      # 21 项：Agent 路径 tools/list → 402 → 沙箱收银 → 交付 → 幂等重放
 node scripts/verify-account-flow.mjs  # 17 项：买家路径 买包 → 转赠 → 兑换 → 余额交付 → 撤销 → 退款回收
 ```
