@@ -379,6 +379,17 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
         return sendResource(res, effectiveTradeNo, outTradeNo, effectiveResourceId, serviceResult, true, entitlement);
       }
 
+      // ⚠️ 与官方《接入指南》的一处**有意差异**（2026-11-23 记录）：
+      //    官方原文是「验证成功返回资源内容，并**异步调用** fulfillment.confirm 发送履约回执」
+      //    ——即官方顺序是「先交付资源，回执随后异步发」。
+      //    本实现是「先确认回执，再交付资源」，理由：
+      //      ① 保证「支付宝已记账」与「资源已交付」严格一致——不会出现
+      //         我们交付了资源、但支付宝侧从未收到履约回执的悬空订单；
+      //      ② 官方买方工具在取得资源后**还会自动再发一次**回执，
+      //         所以回执天然可能被发两次——客户端已对「语义上等于成功」的
+      //         重复确认做了幂等放行（见 client.js isIdempotentSuccess）。
+      //    代价是交付多一次网络往返（约 1s），换来的是账实一致；
+      //    若评审要求严格按官方异步顺序，只需把本段移到 sendResource 之后即可。
       const confirmed = await alipayClient.confirmFulfillment({ tradeNo: effectiveTradeNo });
       if (!confirmed.ok) {
         return res.status(502).json({

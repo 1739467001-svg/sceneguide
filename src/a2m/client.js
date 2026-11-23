@@ -21,6 +21,24 @@ import { toPem } from './protocol.js';
  */
 const MALFORMED_RETRY_DELAYS = [1000, 2000, 3000];
 
+
+/**
+ * 判断一次业务拒绝是否**语义上等于成功**（幂等重放场景）。
+ *
+ * 背景：同一笔 trade_no 的履约回执可能被发送两次——
+ *   ① 商家服务端在交付前主动发（我们的实现）
+ *   ② 官方买方工具在取得资源后自动发（官方 alipay-payment-skill 明确规定）
+ * 支付宝对第二次确认的响应形态官方未公开，这里按「语义包含已确认/已完成」来识别，
+ * 宁可放行（多发一次回执无害）也不要把已完成的支付卡在 502。
+ */
+export function isIdempotentSuccess(errorCode = '', errorMessage = '') {
+  const code = String(errorCode).toUpperCase();
+  const msg = String(errorMessage);
+  const codeHit = /ALREADY_CONFIRM|ALREADY_FULFILL|DUPLICATE|REPEAT|IDEMPOTENT/.test(code);
+  const msgHit = /已确认|已履约|已完成|重复确认|已经确认|重复/.test(msg);
+  return codeHit || msgHit;
+}
+
 /** 执行 OpenAPI；仅对「响应无法解析」重试，业务结果原样返回 */
 async function execWithRetry(sdk, api, bizContent) {
   for (let attempt = 0; ; attempt++) {
@@ -127,13 +145,24 @@ export function createAlipayClient(config) {
       if (String(data.code) !== '10000') {
         // 与 verifyPayment 同口径：错误响应被 SDK 拍平并改驼峰（详见上文）
         const rejection = response?.error_response ?? data;
-        return {
-          ok: false,
-          errorCode:
-            rejection.sub_code ?? rejection.subCode ?? rejection.errorCode ?? data.code ?? 'FULFILLMENT_ERROR',
-          errorMessage:
-            rejection.sub_msg ?? rejection.subMsg ?? rejection.msg ?? data.msg ?? '履约确认失败',
-        };
+        const errorCode =
+          rejection.sub_code ?? rejection.subCode ?? rejection.errorCode ?? data.code ?? 'FULFILLMENT_ERROR';
+        const errorMessage =
+          rejection.sub_msg ?? rejection.subMsg ?? rejection.msg ?? data.msg ?? '履约确认失败';
+
+        // 🔴 幂等成功识别（2026-11-23）：官方买方工具在**取得资源后会自动再发一次**
+        //    履约回执（见官方 alipay-payment-skill/references/402-payment.md：
+        //    「取得非空资源后命令已自动发送履约回执」）。
+        //    也就是说同一笔 trade_no 会被确认两次——若支付宝对第二次返回业务错误，
+        //    旧实现会把它当成致命失败 → 502 且**不交付资源**，
+        //    而对方其实已经确认过，流程就此卡死。
+        //    因此：凡是「已确认/已履约/重复确认」这类**语义上等于成功**的拒绝，
+        //    一律按成功处理（并标记 alreadyConfirmed 供日志与排查）。
+        if (isIdempotentSuccess(errorCode, errorMessage)) {
+          return { ok: true, alreadyConfirmed: true, errorCode, errorMessage };
+        }
+
+        return { ok: false, errorCode, errorMessage };
       }
       return { ok: true };
     },

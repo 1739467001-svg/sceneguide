@@ -60,7 +60,14 @@ export function toPem(privateKeyB64) {
 export function buildSignContent(params) {
   return Object.keys(params)
     .sort()
-    .filter((key) => params[key] !== null && params[key] !== undefined && params[key] !== '')
+    // ⚠️ 必须与官方 Java 参考实现逐字一致：`value != null && !value.trim().isEmpty()`
+    //    ——**只判断 `!== ''` 不够**：只含空白的值（如 '  '）在官方被跳过，
+    //    在我们这里却会参与签名 → 签名内容与官方不一致 → 验签失败。
+    //    （2026-11-23 由 scripts/protocol-unit-check.mjs 抓出）
+    .filter((key) => {
+      const v = params[key];
+      return v !== null && v !== undefined && String(v).trim() !== '';
+    })
     .map((key) => `${key}=${params[key]}`)
     .join('&');
 }
@@ -125,6 +132,28 @@ export function formatISO8601WithTimezone(date = new Date()) {
  * 官方参考实现中，**参与签名的字段是扁平子集**（8 个），而载荷本身是 protocol/method 嵌套结构。
  * 签名内容不包含 seller_signature 自身。
  */
+/**
+ * 官方约定的**参与签名的扁平字段集**（8 个）。
+ *
+ * 依据：官方参考实现 `A2MPaymentDemoController.java` 与官方 Node 参考实现
+ * `generateSellerSignature` —— 签名内容是跨 protocol/method 抽取的**扁平 8 字段**，
+ * 而载荷本身是 protocol/method **嵌套**结构（这是官方文档未写明、实测踩出来的一条）。
+ *
+ * ⚠️ 以下字段**不参与签名**（但会出现在载荷里）：
+ *    seller_signature（不参与自身签名）、seller_app_id、seller_name、
+ *    seller_sign_type、seller_unique_id、seller_unique_id_key
+ */
+export const SIGNED_FIELD_NAMES = Object.freeze([
+  'amount',
+  'currency',
+  'goods_name',
+  'out_trade_no',
+  'pay_before',
+  'resource_id',
+  'seller_id',
+  'service_id',
+]);
+
 export function buildPaymentNeeded({
   outTradeNo,
   amount,
@@ -138,6 +167,7 @@ export function buildPaymentNeeded({
   serviceId,
   privateKeyB64,
 }) {
+  // 签名字段集 = 官方 8 字段（常量是单一事实来源，避免手写清单与常量漂移）
   const signedFields = {
     amount,
     currency,
@@ -148,6 +178,14 @@ export function buildPaymentNeeded({
     seller_id: sellerId,
     service_id: serviceId,
   };
+  // 自检：手写清单必须与官方常量一致（多一个/少一个都会导致验签失败）
+  const actual = Object.keys(signedFields).sort();
+  const expected = [...SIGNED_FIELD_NAMES].sort();
+  if (actual.join(',') !== expected.join(',')) {
+    throw new Error(
+      `签名字段集与官方约定不一致：\n  实际 ${actual.join(',')}\n  期望 ${expected.join(',')}`,
+    );
+  }
   const sellerSignature = rsaSign(buildSignContent(signedFields), privateKeyB64);
 
   return {
