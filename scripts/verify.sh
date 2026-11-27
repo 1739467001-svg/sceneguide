@@ -816,6 +816,25 @@ else
   grep '✗' /tmp/sg-qr.log | sed 's/^/      /'
 fi
 
+# ── 27. 介绍文档 PDF 与 HTML 源一致（渲染产物最容易漂移）────────
+# 2026-11-27 发现：PDF 里写「84 项」而 HTML 源早已是「88 项」——PDF 停留在 11-24
+# 那次渲染，之后又加了 4 项验收。评委拿的是 PDF，站点写的是 88，一眼看出文档没跟着代码走。
+# 重渲：bash scripts/build-intro-pdf.sh
+step "27. 介绍文档 PDF 与 HTML 源一致"
+PDF_MD="${SCRIPT_DIR%/scripts}/提交材料/作品介绍文档.pdf"
+HTML_MD="${SCRIPT_DIR%/scripts}/提交材料/作品介绍文档.html"
+if [[ ! -f "$PDF_MD" || ! -f "$HTML_MD" ]]; then
+  bad "缺少 作品介绍文档.pdf 或其 HTML 源"
+else
+  SRC_N=$(grep -oE '[0-9]+ 项' "$HTML_MD" | head -1 | grep -oE '[0-9]+')
+  PDF_TXT=$(pdftotext -layout "$PDF_MD" - 2>/dev/null || true)
+  if printf '%s' "$PDF_TXT" | grep -q "${SRC_N} 项"; then
+    ok "PDF 与 HTML 源计数一致（${SRC_N} 项）"
+  else
+    bad "PDF 落后于 HTML 源（源为 ${SRC_N} 项）——跑 bash scripts/build-intro-pdf.sh 重渲"
+  fi
+fi
+
 # ── 汇总 ────────────────────────────────────────────────────
 printf '\n%s\n' "────────────────────────────────────────────────────────"
 if [[ $FAIL -eq 0 ]]; then
