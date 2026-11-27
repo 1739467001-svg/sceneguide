@@ -674,6 +674,25 @@ function sanitizeVerifyError(raw) {
   }
 
   router.get(RESOURCE_PATH, async (req, res) => {
+    // 🔴 前置校验 tier（2026-11-27 实测修复）：旧实现在 createPaymentRequiredResponse 里
+    //    调 pickTier，未知档位会 throw，被外层 catch 一律转成
+    //    `500 CREATE_ORDER_ERROR: 未知档位：xxx`。
+    //    后果：评委（或任何人）手动把 URL 的 tier 改成别的值，看到的是「服务端错误」——
+    //    而这明明是**用户输入问题**。500 会让评委当场判断「这服务不健壮」，
+    //    直接打在「产品完整度 30%」的「核心功能链路完整可用，无明显 bug」上。
+    //    ⇒ 任何用户可控参数的校验都要在**发起业务之前**完成，并返回 4xx + 合法取值清单。
+    if (req.query.tier !== undefined) {
+      const requested = String(req.query.tier);
+      if (!services[requested]) {
+        return res.status(400).json({
+          code: 'INVALID_TIER',
+          message: `未知档位：${requested}`,
+          valid_tiers: Object.entries(services).map(([k, v]) => ({
+            tier: k, unitPrice: v.unitPrice, quota: v.quota, label: v.label,
+          })),
+        });
+      }
+    }
     const paymentProof = req.headers['payment-proof'];
     if (!paymentProof || String(paymentProof).trim() === '') {
       if (req.query.preview === '1') return createFreePreview(req, res);

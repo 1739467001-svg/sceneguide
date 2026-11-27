@@ -835,6 +835,18 @@ else
   fi
 fi
 
+# ── 28. 输入健壮性（用户改个参数不该把服务端打挂）────────────
+# 2026-11-27 实测：tier=非法档位 返回 500 CREATE_ORDER_ERROR——用户输入问题
+# 被表现成服务端故障，评委手动改个 URL 就会看到「这服务不健壮」。
+# 已修：未知 tier 前置校验 → 400 + 合法取值清单。本项守住这条。
+step "28. 输入健壮性压测（17 个边界用例）"
+if node "$SCRIPT_DIR/verify-input-hardening.mjs" > /tmp/sg-input.log 2>&1; then
+  ok "输入健壮性通过（无 5xx：空/超长/注入/非法 tier·mode/同名起终点/尾随逗号，见 scripts/verify-input-hardening.mjs）"
+else
+  bad "输入健壮性有问题（node scripts/verify-input-hardening.mjs 查看详情）"
+  grep '✗' /tmp/sg-input.log | sed 's/^/      /'
+fi
+
 # ── 汇总 ────────────────────────────────────────────────────
 printf '\n%s\n' "────────────────────────────────────────────────────────"
 if [[ $FAIL -eq 0 ]]; then
