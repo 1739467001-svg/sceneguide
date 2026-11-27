@@ -307,7 +307,7 @@
         <h3 class="panel-title panel-title-sm">一键跑完上面所有验收</h3>
         <p class="panel-note">
           验收脚本随作品一起交付。它会真的发起支付、真的查订单状态、真的解码协议头——
-          右侧输出为 <b>2026-11-23 真实运行捕获</b>（<b>84 项</b>：402 全链路 / 幂等履约 / 额度台账 / 打卡闭环 / 增长归因 / MCP Agent 链路 / 买家账户中心 / 机构采购留资 / 深层 404 / 数据库体检 / 官方买方脚本验收 / 官方异步通知通道 / 生产模式支付契约 / 冷评委页面级路径 / 离线协议自检 / 三维渲染完整性）。
+          右侧输出为 <b>2026-11-23 真实运行捕获</b>（<b>88 项</b>：402 全链路 / 幂等履约 / 额度台账 / 打卡闭环 / 增长归因 / MCP Agent 链路 / 买家账户中心 / 机构采购留资 / 深层 404 / 数据库体检 / 官方买方脚本验收 / 官方异步通知通道 / 生产模式支付契约 / 冷评委页面级路径 / 离线协议自检 / 三维渲染完整性）。
         </p>
         <div class="codeblock">
           <div class="codeblock-head"><span>scripts/verify.sh</span>
@@ -317,7 +317,7 @@
 目标：http://127.0.0.1:3000
 
 ▸ 0. 离线协议自检（不依赖沙箱）
-  ✓ 离线自检全部通过（其中 smoke 协议自检 69 项：场景内核 / 402 协议 / 商家签名 / 幂等 / 内核边界回归；本节为全量 84 项中的第 0 节）
+  ✓ 离线自检全部通过（其中 smoke 协议自检 69 项：场景内核 / 402 协议 / 商家签名 / 幂等 / 内核边界回归；本节为全量 88 项中的第 0 节）
 ▸ 1. 服务可达性
   ✓ GET /healthz → 200
 ▸ 1. 付费资源返回 402 支付挑战
@@ -415,7 +415,7 @@
 ▸ 20. 三维渲染完整性（浏览器层）
   ✓ 三维渲染完整性通过（建筑对齐 footprint / demo-park 不黑屏，见 scripts/verify-render.mjs）
 ────────────────────────────────────────────────────────
-全部通过：84 项
+全部通过：88 项
 </code></pre>
         </div>
       </div>
@@ -566,8 +566,13 @@
         它自己发起请求、拿到 402 账单、走官方沙箱收银付款、携 <code>Payment-Proof</code> 重试，
         然后由<b>官方脚本自己</b>校验交付证据。<br />
         官方脚本的结论原文：<b>「AI 按量付费沙箱服务端联调通过」</b>。
-        任何人都可以复跑同一条命令验证：
-        <br /><code>bash scripts/official-buyer-check.sh</code>
+        <br /><b>你自己也能验</b>（只需要装有支付宝官方买方 CLI <code>alipay-bot</code>，
+        不需要我们仓库里的任何东西）——直接让它来买本服务：
+        <br /><code style="display:block;margin:8px 0;padding:10px;background:rgba(0,0,0,.3);border-radius:8px;white-space:pre-wrap;word-break:break-all">alipay-bot 402-buyer-pay --method GET --resource-url 'https://121.43.80.231/sceneguide/api/v1/guide?scene=zjgsu-xiasha&query=%E4%BB%8E%E5%9B%BE%E4%B9%A6%E9%A6%86%E5%88%B0%E8%A1%8C%E6%94%BF%E6%A5%BC%E6%80%8E%E4%B9%88%E8%B5%B0'</code>
+        它会自己拿到 402 账单、引导你在支付宝确认付款、携 <code>Payment-Proof</code> 重试，
+        并把交付结果与 <code>Payment-Validation</code> 回执一并打印出来。
+        <br />想连我们的验收套件一起跑（需要官方 Skill 与沙箱配置）：
+        <code>bash scripts/official-buyer-check.sh</code>
       </div>
   </div>
 </section>

@@ -106,5 +106,5 @@ sudo bash deploy/https/enable-https.sh <你的域名>
 ## 验证
 
 ```bash
-BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh   # 84 项验收（含 MCP Agent 链路与买家账户中心）
+BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh   # 88 项验收（含 MCP Agent 链路与买家账户中心）
 ```

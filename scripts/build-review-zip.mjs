@@ -57,7 +57,7 @@ ${MANIFEST.map((f, i) => `${i + 1}. ${f.name}\n   中文名：${f.zh}\n   ${f.de
 怎么自己验（不需要评审账号 / 邀请码）：
   1. 解压后看 acceptance-notes.txt，里面是一条命令：
      BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh
-  2. 该命令会在我们线上服务上真实走一遍支付宝沙箱收银，共 84 项断言。
+  2. 该命令会在我们线上服务上真实走一遍支付宝沙箱收银，共 88 项断言。
   3. 代码仓库（MIT 开源，含完整提交历史）：https://github.com/1739467001-svg/sceneguide
 
 演示地址（手机/电脑均可，免注册）：https://121.43.80.231/sceneguide/
