@@ -781,6 +781,18 @@ else
   grep '✗' /tmp/sg-cutover.log | sed 's/^/      /'
 fi
 
+# ── 24. 官方接口字段限额（沙箱宽松、生产才会拒的那类约束）────────
+# 官方 API 文档：out_trade_no / goods_name / service_id / memo 均 string [1,32]；
+# amount ≤ 50 元；pay_before 不超过当前 12h。这些沙箱不一定拦，切生产后超限
+# 只会换来一个笼统的业务失败码。验的是**线上真实 402 里的实发值**。
+step "24. 官方接口字段限额（线上真实 402 实发值）"
+if node "$SCRIPT_DIR/verify-official-limits.mjs" > /tmp/sg-limits.log 2>&1; then
+  ok "官方字段限额全部合规（out_trade_no 29/32 · goods_name ≤19/32 · service_id ≤21/32 · pay_before 30 分钟，见 scripts/verify-official-limits.mjs）"
+else
+  bad "官方字段限额存在越界项（node scripts/verify-official-limits.mjs 查看详情）"
+  grep '✗' /tmp/sg-limits.log | sed 's/^/      /'
+fi
+
 # ── 汇总 ────────────────────────────────────────────────────
 printf '\n%s\n' "────────────────────────────────────────────────────────"
 if [[ $FAIL -eq 0 ]]; then
