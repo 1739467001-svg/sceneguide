@@ -1,0 +1,18 @@
+{
+  "_comment": "官方 AI 付 onboarding 的固定上下文（AI 按量付费赛道）。run_id 与 MCC_CONTEXT_RECEIPT 来自 2026-11-24 的 onboarding-bootstrap / mcc.sh resolve-plan；product_name 必须**逐字**是「AI 按量付费」（中间有空格，官方渲染器按固定映射校验）。这些都不是密钥，可以进仓库；换一轮 onboarding 需要重新生成。",
+  "product_type": "aipay",
+  "product_name": "AI 按量付费",
+  "sales_code": "I1080300001000160457",
+  "scope": "app:all,machine_pay:write,agmnt:write",
+  "mcc_code": "A0007_B0113",
+  "mcc_name": "信息检索服务/网络论坛",
+  "run_id": "294c81a7-1063-466c-9048-d6713e3fed98",
+  "mcc_context_receipt": "AIPAY_MCC_CONTEXT_V1.eyJzY2hlbWFfdmVyIjoxLCJwcm9kdWN0X3R5cGUiOiJhaXBheSIsInNhbGVzX2NvZGUiOiJJMTA4MDMwMDAwMTAwMDE2MDQ1NyIsIm1jY19jb2RlIjoiQTAwMDdfQjAxMTMiLCJtY2NfbmFtZSI6IuS_oeaBr-ajgOe0ouacjeWKoS_nvZHnu5zorrrlnZsiLCJuZWVkX3NwZWNpYWxfcXVhbCI6ZmFsc2UsInF1YWxpZmljYXRpb25fZ3JvdXBzIjpbXSwibWNjX2Rlc2NyaXB0aW9uIjoi5o-Q5L6b572R56uZ6K665Z2b44CB5ZKo6K-i5L-h5oGv562J5pyN5Yqh55qE5YWs5Y-4IiwicnVuX2lkIjoiMjk0YzgxYTctMTA2My00NjZjLTkwNDgtZDY3MTNlM2ZlZDk4In0.cCDZo6BW9jdgMrQnhLgfmoWE6aIBS7GF3cvxW2BVlJw",
+  "_skill_dir": "/Users/mac/.agents/skills/alipay-aipay",
+  "_notes": [
+    "授权链接由官方 auth.sh 构造（aipay.alipay.com/cli-auth?deviceCode=…&productCode=…&mccCode=…），",
+    "官方策略表明确「禁用 verification_url」——CLI 那个 open.alipay.com/…/cli-auth?device_code=… 只给 scope，",
+    "不建立产品/MCC 绑定，导致 ar-query 的 ctx 永远为空、signing/application 一直 QUERY_FAILED。",
+    "重跑前必须先 alipay-cli logout：auth init 在「已登录但上下文无效」时走 SKIP 分支，不会重新发起授权。"
+  ]
+}

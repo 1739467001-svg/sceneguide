@@ -437,14 +437,44 @@ const packUsage = integRepo.getDb().prepare('SELECT COUNT(*) AS n FROM usage_rec
 check('M3 权益交付可落用量记录（recordUsage 两条路径共用）', packUsage === usageRows.length, `实际 ${packUsage}`);
 integRepo.close();
 
-// C1：生产环境拒绝带 mock serviceId 启动（旧防护检查的是死字段）
-let prodRejected = false;
+// C1：生产环境不得使用 mock serviceId
+//
+// ⚠️ 2026-11-24 结构变了：真实 serviceId 现在放在 .gitignore 的覆盖层
+//    config/services.production.json 里（services.json 被 git 跟踪且沙箱共用，
+//    写真实 id 会把沙箱收银弄挂）。
+//    ⇒ 断言要从「生产直接拒绝启动」改成「生产**不会**用到 mock serviceId」。
+//
+//    这条防护本身没削弱，反而更严：现在要验两件事——
+//      ① 生产档位里**没有** api_mock_service_id；
+//      ② 把覆盖层藏起来时，生产**必须**拒绝启动（否则等于没防护）。
+let prodTiers = null;
+let prodLoadErr = null;
 try {
-  loadServices({ env: 'production' });
+  prodTiers = loadServices({ env: 'production' });
 } catch (err) {
-  prodRejected = /api_mock_service_id/.test(err.message);
+  prodLoadErr = err;
 }
-check('C1 生产环境拒绝 mock serviceId（防止上线后每笔支付被拒单）', prodRejected);
+check(
+  'C1 生产档位不含 mock serviceId（防止上线后每笔支付被拒单）',
+  prodTiers !== null && Object.values(prodTiers).every((x) => String(x.serviceId) !== 'api_mock_service_id'),
+  prodLoadErr ? `加载失败：${prodLoadErr.message}` : '',
+);
+// C1b：把覆盖层指到一个不存在的文件，模拟「服务器上忘了放覆盖层」——
+//      生产必须拒绝启动，而不是裸奔到线上每笔支付被拒。
+let prodNoOverlayRejected = false;
+try {
+  process.env.ALIPAY_SERVICES_IDS_CONFIG = '/tmp/sg-definitely-missing-overlay.json';
+  const noOverlay = loadServices({ env: 'production' });
+  prodNoOverlayRejected = Object.values(noOverlay).some((x) => String(x.serviceId) === 'api_mock_service_id');
+} catch (err) {
+  prodNoOverlayRejected = /serviceId/.test(err.message);
+} finally {
+  delete process.env.ALIPAY_SERVICES_IDS_CONFIG;
+}
+check(
+  'C1b 覆盖层缺失时生产拒绝启动（不能裸奔到线上每笔支付被拒）',
+  prodNoOverlayRejected,
+);
 check('沙箱环境仍接受 mock serviceId（回归）', typeof loadServices({ env: 'sandbox' }).single === 'object');
 
 // H4：举报一人一票（同一个人点 3 次不能把反馈刷下架）

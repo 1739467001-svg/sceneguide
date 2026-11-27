@@ -13,6 +13,18 @@ const PRODUCTION_FILE = process.env.ALIPAY_PRODUCTION_CONFIG
 const SERVICES_FILE = process.env.ALIPAY_SERVICES_CONFIG
   ? path.resolve(process.env.ALIPAY_SERVICES_CONFIG)
   : path.join(ROOT, 'config', 'services.json');
+// 生产 service_id 覆盖层（gitignore）：档位形状与价格留在被跟踪的 services.json，
+// 真实 service_id 只存在于这里，避免污染公开仓库、也避免把沙箱收银弄坏。
+//
+// ⚠️ 路径必须**在调用时**解析，不能提到模块顶层：
+//    ESM 模块只求值一次，顶层常量会在第一次 import 时把路径定死，
+//    之后再设 ALIPAY_SERVICES_IDS_CONFIG 也不生效（验收脚本要靠它模拟「覆盖层缺失」）。
+//    ——与 src/community.js 里同一个坑的修法一致。
+function servicesIdsFile() {
+  return process.env.ALIPAY_SERVICES_IDS_CONFIG
+    ? path.resolve(process.env.ALIPAY_SERVICES_IDS_CONFIG)
+    : path.join(ROOT, 'config', 'services.production.json');
+}
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -107,9 +119,29 @@ export function loadServices({ env = 'sandbox' } = {}) {
     single: { serviceId: 'api_mock_service_id', unitPrice: '0.01', quota: 1, label: '单次导览' },
   };
 
+  // 🔴 生产 service_id 覆盖层（2026-11-24 新增）
+  //
+  // 为什么不能把真实 service_id 直接写进 config/services.json：
+  //   那份文件是**被 git 跟踪**的（公开仓库里要能看到四档位结构与价格），
+  //   而且**沙箱与生产读的是同一份**——一旦写进真实 service_id，
+  //   沙箱收银就会拿生产服务 id 去下单，直接被拒（沙箱只认 api_mock_service_id），
+  //   **本地验收与线上沙箱演示会同时被打挂**。
+  //
+  // 所以：档位形状与价格留在被跟踪的文件里（公开、可复算），
+  // 真实 service_id 放进 .gitignore 的 config/services.production.json 覆盖层，
+  // 仅在 production 环境合并进来。
+  const overlay = env === 'production' ? readJsonIfExists(servicesIdsFile()) : null;
+  const overlayTiers = overlay?.tiers ?? overlay ?? {};
+
   const out = {};
   for (const [name, tier] of Object.entries(tiers)) {
-    const productionPrice = String(tier.unitPrice);
+    const ov = overlayTiers[name] ?? {};
+    const merged = {
+      ...tier,
+      ...(ov.serviceId ? { serviceId: ov.serviceId } : {}),
+      ...(ov.unitPrice ? { unitPrice: ov.unitPrice } : {}),
+    };
+    const productionPrice = String(merged.unitPrice);
     let unitPrice = productionPrice;
 
     if (env === 'sandbox') {
@@ -137,14 +169,17 @@ export function loadServices({ env = 'sandbox' } = {}) {
     //    后果：ALIPAY_ENV=production 能正常启动，然后每一笔支付挑战都带着 mock
     //    serviceId 去收银 → SERVICE_PRICE_MISMATCH 拒单（且沙箱 ¥0.01 归一化
     //    只改价不改 id，mock 注册价恰是 0.01，与生产价必然错配）。
-    if (env === 'production' && String(tier.serviceId ?? '').trim() === 'api_mock_service_id') {
+    if (env === 'production' && String(merged.serviceId ?? '').trim() === 'api_mock_service_id') {
       throw new Error(
         `生产环境拒绝启动：档位 ${name} 的 serviceId 仍是沙箱占位符 api_mock_service_id。` +
-        '请先在支付宝服务市场注册真实服务，把 config/services.json 里该档位的 serviceId 换成真实值。',
+        '请先在支付宝服务市场注册真实服务，把真实 service_id 写进 config/services.production.json。',
       );
     }
+    if (env === 'production' && !String(merged.serviceId ?? '').trim()) {
+      throw new Error(`生产环境拒绝启动：档位 ${name} 缺少 serviceId。`);
+    }
 
-    out[name] = { ...tier, unitPrice, productionPrice };
+    out[name] = { ...merged, unitPrice, productionPrice };
   }
   return out;
 }

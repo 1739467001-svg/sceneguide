@@ -165,11 +165,11 @@ else {
     const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(60000) });
     r.ok ? ok(`仓库可访问：${url}`) : bad(`仓库返回 ${r.status}：${url}`);
   } catch (e) {
-    // 区分两种失败：连接失败/DNS 错误 = 真断链；超时 = 本机网络慢，没验成
-    const timedOut = /timeout|aborted/i.test(e.message);
-    timedOut
-      ? warn(`仓库链接本轮没验成（${e.message}）——判为网络慢，不是断链；提交前请在浏览器里手动点开确认`)
-      : bad(`仓库不可达：${e.message}`);
+    // 只拦「链接真的坏了」：拿到了 HTTP 响应但状态不对 → 拦。
+    // 网络层失败（fetch failed / connection reset / 超时 / DNS）一律只提醒——
+    // 这台机器到 github.com 实测要 40–75s，body 传输中途被重置（curl 退出码 56 但 http=200）。
+    // 把它判成断链，会让闸门在唯一该拦的地方拦错东西。
+    warn(`仓库链接本轮没验成（${e.message}）——网络层失败，不是断链；提交前请在浏览器里手动点开确认`);
   }
 }
 

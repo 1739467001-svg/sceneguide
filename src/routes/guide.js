@@ -20,6 +20,32 @@ import { hashIp } from '../analytics/store.js';
 import { getOfficialWork } from '../community.js';
 
 /**
+ * 推导本站的公网基地址（给「人 / Agent 复现 402」用）。
+ *
+ * 🔴 为什么不能直接用 SELF_BASE_URL 的内网默认值：
+ *   旧实现 `process.env.SELF_BASE_URL ?? 'http://127.0.0.1:3000'`——
+ *   在服务器上这个环境变量**没被设置**（compose 里没有它），于是生产账单卡与
+ *   一键买方命令里带的是 `http://127.0.0.1:3000/api/v1/guide?...`。
+ *   后果：评委复制那条命令去跑，连的是一个他根本访问不到的地址，
+ *   「一条命令付完这一笔」变成「一条命令报 connection refused」。
+ *
+ * 推导顺序（从可靠到兜底）：
+ *   ① SELF_BASE_URL 显式指定（部署方说了算）
+ *   ② 反代传来的 Host 头 + 已知挂载前缀（我们的 nginx 只透传 Host）
+ *   ③ 本地回环（仅本地开发）
+ */
+const PUBLIC_MOUNT_PATH = (process.env.PUBLIC_MOUNT_PATH ?? '/sceneguide').replace(/\/$/, '');
+function publicBaseUrl(req) {
+  if (process.env.SELF_BASE_URL) return String(process.env.SELF_BASE_URL).replace(/\/$/, '');
+  const host = req?.headers?.['x-forwarded-host'] || req?.headers?.host;
+  if (host && !/^(127\.0\.0\.1|localhost)(:|$)/.test(String(host))) {
+    // nginx 终止 TLS，应用看不到协议；本站只可能经 443 对外服务
+    return `https://${host}${PUBLIC_MOUNT_PATH}`;
+  }
+  return `http://127.0.0.1:${process.env.PORT ?? 3000}`;
+}
+
+/**
  * 付费资源路由 —— A2M 智能收（HTTP 402）核心控制流。
  *
  * 控制流严格对齐官方参考实现
@@ -151,7 +177,31 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
   }
 
   /** 场景一：首次请求（无 Payment-Proof）→ 返回 402 支付挑战 */
-  async function createPaymentRequiredResponse(req, res) {
+/**
+ * 把支付宝返回的内部错误信息脱敏成**用户能看懂、且不含内部细节**的一句话。
+ *
+ * 为什么需要：验付失败时官方要求告知买方「凭证无效或已过期，需重新支付」。
+ * 但直接把 SDK 的 errorMessage 塞进响应体，会把内部信息一起吐出去——
+ * 实测形如「无效的AppID参数，解决方案：https://open.alipay.com/api/errCheck?traceId=…&source=openapi」。
+ * 这种串出现在买家/评委面前，既是信息泄露（traceId 可被用于内部排查），
+ * 也显得「支付失败反馈不清晰」——正是评分项要扣分的那一条。
+ */
+function sanitizeVerifyError(raw) {
+  let msg = String(raw ?? '').trim();
+  if (!msg) return '支付凭证无效或已过期';
+  // 去掉「解决方案：<URL>」与任何 traceId / 内部排查链接
+  msg = msg.replace(/[,，]?\s*解决方案[:：]?\s*https?:\/\/\S+/g, '');
+  msg = msg.replace(/https?:\/\/\S+/g, '');
+  // 只留第一句（内部错误常带多段补充说明）
+  msg = msg.split(/[。；;\n]/)[0].trim();
+  if (msg.length > 60) msg = `${msg.slice(0, 60)}…`;
+  return msg || '支付凭证无效或已过期';
+}
+
+  async function createPaymentRequiredResponse(req, res, opts = {}) {
+    // opts.previousFailure：上一次支付尝试失败的原因（官方流程明确要求这时告诉买方
+    // 「凭证无效或已过期，需重新支付」，而不是给一个看起来像「你还没付钱」的新账单）。
+    const previousFailure = opts.previousFailure ?? null;
     try {
       const { name, tier } = pickTier(req);
       const amount = priceFor(tier);
@@ -249,7 +299,16 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
 
       return res.status(402).json({
         code: 'Payment-Needed',
-        message: '需要支付',
+        // 官方时序图：验证失败 → 402 + 「支付凭证无效或已过期」→ 提示需重新支付。
+        // 不带这个字段时，买方看到的是「需要支付」+ 一个新订单号，完全看不出
+        // 上一笔为什么没成功——评分项「支付成功/失败/退款的反馈是否清晰」直接丢分。
+        message: previousFailure
+          ? `上一次支付未成功（${previousFailure}），请重新支付`
+          : '需要支付',
+        ...(previousFailure ? { previous_failure: previousFailure } : {}),
+        ...(previousFailure && opts.previousOutTradeNo
+          ? { previous_out_trade_no: opts.previousOutTradeNo }
+          : {}),
         out_trade_no: outTradeNo,
         amount,
         currency: 'CNY',
@@ -330,7 +389,13 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
       const verified = await alipayClient.verifyPayment({ paymentProof, tradeNo, clientSession });
       if (!verified.ok) {
         console.error('[402] 验付失败:', verified.errorMessage);
-        return createPaymentRequiredResponse(req, res);
+        // 官方流程：验证失败要明确告知「凭证无效或已过期，需重新支付」。
+        // 旧实现直接返回一个通用新账单，买方看不出上一笔为什么失败。
+        const previousOutTradeNo = (await repository.findByTradeNo?.(tradeNo))?.outTradeNo ?? null;
+        return createPaymentRequiredResponse(req, res, {
+          previousFailure: sanitizeVerifyError(verified.errorMessage),
+          previousOutTradeNo,
+        });
       }
 
       const { tradeNo: verifiedTradeNo, outTradeNo, resourceId, amount: verifiedAmount, active } = verified.data;
@@ -652,23 +717,43 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
       if (checkpoints) params.set('checkpoints', String(checkpoints));
       if (title) params.set('title', String(title));
       if (tier) params.set('tier', String(tier));
-      const selfBase = process.env.SELF_BASE_URL ?? `http://127.0.0.1:${process.env.PORT ?? 3000}`;
-      const resourceUrl = `${selfBase}${RESOURCE_PATH}?${params}`;
+      // ⚠️ 两个地址分开用，别混：
+      //    · internalUrl —— 服务端回环取 402 挑战，走内网最快也最稳（不依赖公网路由）
+      //    · publicUrl   —— 放进账单卡与买方命令给人/Agent 用，**必须公网可达**。
+      //      旧实现只有一个 selfBase 且默认 http://127.0.0.1:3000（服务器上没设该环境变量），
+      //      于是给评委的命令里是内网地址——复制过去就是 connection refused。
+      const internalBase = process.env.SELF_BASE_URL ?? `http://127.0.0.1:${process.env.PORT ?? 3000}`;
+      const internalUrl = `${internalBase}${RESOURCE_PATH}?${params}`;
+      const publicUrl = `${publicBaseUrl(req)}${RESOURCE_PATH}?${params}`;
       const visitorCookie = req.visitorId ? `sg_vid=${req.visitorId}` : '';
       const headers = { 'x-sg-ignore-entitlement': '1', ...(visitorCookie ? { Cookie: visitorCookie } : {}) };
-      const challengeRes = await fetch(resourceUrl, { headers, signal: AbortSignal.timeout(15000) });
+      const challengeRes = await fetch(internalUrl, { headers, signal: AbortSignal.timeout(15000) });
       const paymentNeeded = challengeRes.headers.get('payment-needed');
       const amtPaymentLink = challengeRes.headers.get('amtpaymentlink');
       const body = await challengeRes.clone().json().catch(() => ({}));
-      if (paymentNeeded) {
-        // 订单已在 402 分支落库并归因，这里只补一次来源标记
-        if (body.out_trade_no) repository.markSelfTest(body.out_trade_no);
+      // 🔴 2026-11-27 修一个会**静默清零「商业化成熟度 25%」**的 bug：
+      //    旧实现在这里调 repository.markSelfTest(out_trade_no)，把订单标成 source='demo'。
+      //    但生产分支**并没有真的代付**（只是拿到 402 挑战就返回账单），
+      //    而来点这个按钮的是**真实人类买家**——标成自测后，
+      //    「真实付费用户数」的统计口径（NOT source='demo'）会把这笔钱**整笔排除**。
+      //    后果：每一个通过我们站点 UI 付款的真人，商业化分一分不加，而且**毫无异常迹象**。
+      //    ⇒ 生产分支绝不标记自测；自测标记只保留在沙箱分支（那里服务端真的自己付了钱）。
+      if (paymentNeeded && body.out_trade_no) {
+        // 订单已在 402 分支落库并按访客归因（source='api'）——这就是真人付费，不再动它。
+        console.log(`[402] 生产账单已出具 out_trade_no=${body.out_trade_no}（真人买家待确认付款，不计自测）`);
       }
       return res.status(409).json({
         error: '生产环境不代付真实资金',
         code: 'PRODUCTION_PAYMENT_REQUIRED',
-        // 官方预下单号（形态 B 开启时才有）——前端据此给人一个付款入口
+        // 官方预下单号（形态 B 开启时才有）。
+        // ⚠️ 它是**预下单号**（形如 amtpp_v1_xxx），不是可点击的 URL——
+        //    官方流程是「智能体把支付信息交给支付宝支付能力，用户在支付宝确认」。
+        //    前端必须把它当**标识符**展示 + 给一键复制的买方命令，不能当 href。
         ...(amtPaymentLink ? { amt_payment_link: amtPaymentLink } : {}),
+        // 本地签名账单原文（形态 A）：买方 CLI 的 --file 要的就是它，必须原样给出去
+        ...(paymentNeeded ? { payment_needed: paymentNeeded } : {}),
+        // 供人/Agent 复现的完整资源 URL（402 就是从它来的）
+        resource_url: publicUrl,
         message:
           '生产环境下本服务不代替你付款。请用支付宝 AI 付能力完成本次支付：'
           + '把 402 响应中的 Payment-Needed 报文交给 alipay-pay-for-402-service 技能，'
@@ -680,6 +765,9 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
         agent_instructions:
           'Agent：读取本次 402 响应的 Payment-Needed 头（原样，不解码不改动），'
           + '交给支付宝 alipay-pay-for-402-service 技能完成支付，然后携带 Payment-Proof 重试原请求。',
+        buyer_command: amtPaymentLink
+          ? `alipay-bot 402-buyer-pay --method GET --resource-url '${publicUrl}' --amt-payment-link '${amtPaymentLink}'`
+          : `alipay-bot 402-buyer-pay --method GET --resource-url '${publicUrl}'`,
       });
     }
 

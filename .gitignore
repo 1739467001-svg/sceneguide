@@ -16,3 +16,6 @@ config/production.json
 .env
 *.log
 .DS_Store
+
+# 生产 service_id 覆盖层（真实服务 id 不进公开仓库）
+config/services.production.json

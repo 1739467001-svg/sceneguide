@@ -10,7 +10,7 @@
  *   - /api/ 与 /mcp：network-only —— 支付链路绝不能被缓存命中，否则会拿到过期的 402 账单
  */
 
-const VERSION = 'sg-v12';
+const VERSION = 'sg-v13';
 const STATIC_CACHE = `sceneguide-static-${VERSION}`;
 
 // 相对路径：按 SW 所在目录解析，部署在任意前缀下都成立

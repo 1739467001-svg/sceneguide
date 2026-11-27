@@ -209,8 +209,9 @@
     requestAnimationFrame(step);
   }
 
-  // 复制按钮
+  // 复制按钮（静态部分）
   $$('.copy-btn').forEach((btn) => {
+    btn.dataset.sgStatic = '1';   // 标记：已被直接绑定，委托里跳过，避免双重处理
     btn.addEventListener('click', async () => {
       const target = $(btn.dataset.copy);
       if (!target) return;
@@ -227,6 +228,28 @@
         btn.classList.remove('done');
       }, 1600);
     });
+  });
+
+  // 运行时插入的复制按钮（生产账单卡、预下单号、买方命令等）
+  // 上面那轮 forEach 只在初始化时跑，setResult() 换掉 innerHTML 之后的新按钮没有监听器。
+  document.addEventListener('click', async (ev) => {
+    const btn = ev.target instanceof Element ? ev.target.closest('.copy-btn') : null;
+    if (!btn || btn.dataset.sgStatic === '1') return;
+    const target = $(btn.dataset.copy);
+    if (!target) return;
+    const text = target.innerText;
+    const original = btn.textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.textContent = '已复制';
+      btn.classList.add('done');
+    } catch {
+      btn.textContent = '复制失败';
+    }
+    setTimeout(() => {
+      btn.textContent = original;
+      btn.classList.remove('done');
+    }, 1600);
   });
 
   /* ────────────── 画布渲染 ────────────── */
@@ -1663,10 +1686,25 @@ ${JSON.stringify(
    *
    * 场景：站点已切生产，服务端不会代付真实资金（那必须由用户本人或其 Agent 确认）。
    * 于是这里把**这一笔该付什么、怎么付**完整摊开：
-   *   金额 / 商品 / 订单号 / 给 Agent 的指引 / 给人的说明，
-   * 评委拿到这张卡就能立刻用自己的支付宝或让 Agent 完成这笔支付。
+   *   金额 / 商品 / 订单号 / 预下单号 / 一键可跑的官方买方命令 / 官方 A402 七步流程。
+   *
+   * 🔴 2026-11-27 修一个真 bug：旧实现把 `amt_payment_link` 直接当 `<a href>` 用。
+   *    而官方口径里它是**预下单号**（`amtPaymentLink: amtpp_v1_xxx…`），
+   *    官方时序图写得很清楚：服务端返回 402 + 该响应头，**由智能体把支付信息交给
+   *    支付宝支付能力、用户在支付宝确认**——它从来不是一个可点击的网址。
+   *    当 href 用的后果：评委点「打开支付宝付款」跳到一个相对路径（404/空白），
+   *    直接打在「支付集成度 25%」的「支付流程是否顺畅」上。
    */
   function renderProductionBill(j) {
+    const steps = [
+      '你（或你的 Agent）请求付费资源',
+      '服务端固定本地订单并调用支付宝预下单，取得 <code>amt_pre_pay_id</code>',
+      '服务端返回 <code>402 Payment Required</code> + <code>amtPaymentLink</code> 响应头',
+      '智能体把支付信息交给支付宝支付能力，<b>你在支付宝确认</b>后完成付款',
+      '智能体携带 <code>Payment-Proof</code> 重试同一请求',
+      '服务端调 <code>alipay.aipay.agent.payment.verify</code> 验凭证',
+      '验通 → <code>200 OK</code> + 资源内容 + <code>Payment-Validation</code> 回执',
+    ];
     setResult(`
       <div class="panel" style="margin:0">
         <div class="panel-head">
@@ -1678,23 +1716,50 @@ ${JSON.stringify(
           <dt>金额</dt><dd><b>¥${esc(j.amount ?? '—')}</b></dd>
           <dt>商户订单号</dt><dd><code>${esc(j.out_trade_no ?? '—')}</code></dd>
           <dt>资源标识</dt><dd><code>${esc(j.resource_id ?? '—')}</code></dd>
+          ${j.amt_payment_link ? `<dt>预下单号</dt><dd><code id="sgAmtId">${esc(j.amt_payment_link)}</code>
+            <button class="copy-btn" data-copy="#sgAmtId" style="margin-left:8px">复制</button></dd>` : ''}
         </dl>
+
+        ${j.buyer_command ? `
         <div class="notice notice-blue" style="margin-top:14px">
-          <b>用你的支付宝付这一笔：</b>本页不代付真实资金——按协议必须由你本人或你的 Agent 确认付款。
-          ${j.amt_payment_link ? `
-          <br /><a class="btn btn-primary" style="margin-top:10px"
-             href="${esc(j.amt_payment_link)}" target="_blank" rel="noopener">打开支付宝付款</a>
-          <br /><span style="font-size:12px;opacity:.8">（${esc(j.amt_payment_link)}）</span>` : ''}
-          ${j.agent_instructions ? `
-          <div style="margin-top:12px">
-            <b>Agent 场景：</b><br />
-            <code style="display:block;margin-top:6px;white-space:pre-wrap;font-size:11.5px">${esc(j.agent_instructions)}</code>
-          </div>` : ''}
-          <div style="margin-top:12px">
-            <b>人付：</b>用你的支付宝完成这笔支付后，把支付凭证（Payment-Proof）
-            带回<b>同一个请求</b>重试即可交付资源——订单号 <code>${esc(j.out_trade_no ?? '')}</code> 已经落库。
+          <b>一条命令付完这一笔（推荐）：</b>下面是支付宝官方买方 CLI 的完整命令，
+          预下单号与资源 URL 都已填好，复制到终端执行即可——执行后按提示在支付宝里确认付款。
+          <div style="display:flex;gap:8px;align-items:flex-start;margin-top:10px">
+            <code id="sgBuyerCmd" style="flex:1;display:block;white-space:pre-wrap;word-break:break-all;
+              font-size:11.5px;background:rgba(0,0,0,.28);padding:10px;border-radius:8px">${esc(j.buyer_command)}</code>
+            <button class="copy-btn" data-copy="#sgBuyerCmd" style="flex:none">复制命令</button>
           </div>
+          <div style="margin-top:10px;font-size:12.5px;opacity:.9">
+            ⚠️ 预下单号是<b>标识符</b>，不是可点击的网址——按官方流程，
+            付款确认发生在<b>你的支付宝 App</b> 里，由智能体把支付信息交给支付宝支付能力完成。
+          </div>
+        </div>` : ''}
+
+        <div class="notice notice-amber" style="margin-top:12px">
+          <b>官方 A402 生产流程（aipay 官网 MACHINE_PAY.md 原文时序）：</b>
+          <ol style="margin:8px 0 0;padding-left:20px;line-height:1.85;font-size:13px">
+            ${steps.map((s) => `<li>${s}</li>`).join('')}
+          </ol>
         </div>
+
+        ${j.payment_needed ? `
+        <details style="margin-top:12px">
+          <summary style="cursor:pointer;font-size:13px;color:var(--dim)">
+            形态 A：本地签名的 <code>Payment-Needed</code> 账单原文（Agent 买方走这条，原样不解码）
+          </summary>
+          <div style="display:flex;gap:8px;align-items:flex-start;margin-top:8px">
+            <code id="sgNeeded" style="flex:1;display:block;white-space:pre-wrap;word-break:break-all;
+              font-size:11px;background:rgba(0,0,0,.28);padding:10px;border-radius:8px">${esc(j.payment_needed)}</code>
+            <button class="copy-btn" data-copy="#sgNeeded" style="flex:none">复制</button>
+          </div>
+        </details>` : ''}
+
+        ${j.agent_instructions ? `
+        <div class="notice notice-blue" style="margin-top:12px">
+          <b>让你的 Agent 来付：</b>
+          <code style="display:block;margin-top:6px;white-space:pre-wrap;font-size:11.5px">${esc(j.agent_instructions)}</code>
+        </div>` : ''}
+
         ${j.message ? `<div class="notice notice-amber" style="margin-top:12px">${esc(j.message)}</div>` : ''}
       </div>`);
   }

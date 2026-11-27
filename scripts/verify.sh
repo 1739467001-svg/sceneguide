@@ -769,6 +769,18 @@ else
   grep '✗' /tmp/sg-shell-unicode.log | sed 's/^/      /'
 fi
 
+# ── 23. 生产切换链路契约（不可逆的一段，必须离线可验）────────
+# 切生产 → 取交易号 → 提交作品 只有一次机会。
+# 最容易错又最难事后看出的是「拿错交易号」（沙箱 32 位 / 生产 28 位）
+# 与「脚本写的槽位和就绪包预留的对不上」——这两件都能离线测出来。
+step "23. 生产切换链路契约自检"
+if node "$SCRIPT_DIR/verify-prod-cutover.mjs" > /tmp/sg-cutover.log 2>&1; then
+  ok "生产切换链路契约通过（28 位交易号筛选 / 槽位格式一致 / 缺配置拒绝切 / 私钥不回显，见 scripts/verify-prod-cutover.mjs）"
+else
+  bad "生产切换链路契约有问题（node scripts/verify-prod-cutover.mjs 查看详情）"
+  grep '✗' /tmp/sg-cutover.log | sed 's/^/      /'
+fi
+
 # ── 汇总 ────────────────────────────────────────────────────
 printf '\n%s\n' "────────────────────────────────────────────────────────"
 if [[ $FAIL -eq 0 ]]; then

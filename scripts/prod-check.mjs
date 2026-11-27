@@ -88,19 +88,26 @@ if (!prod) {
 }
 
 // ── 2. 档位表 ─────────────────────────────────────────────────
-step('2. 服务档位 config/services.json');
+// ⚠️ 必须查**合并后的有效配置**，不能只看 config/services.json：
+//    生产 service_id 现在放在 .gitignore 的覆盖层 config/services.production.json 里
+//    （原因：services.json 被 git 跟踪且沙箱共用，写真实 id 会把沙箱收银弄挂）。
+//    2026-11-24 实测：不合并就查会误报「仍是沙箱占位符」，而线上其实是就绪的。
+step('2. 服务档位（档位表 + 生产 service_id 覆盖层）');
 const svc = readJson(servicesFile);
-const tiers = svc?.tiers ?? {};
-const tierNames = Object.keys(tiers);
+const idsFile = path.join(ROOT, 'config', 'services.production.json');
+const idsOverlay = fs.existsSync(idsFile) ? (readJson(idsFile)?.tiers ?? {}) : {};
+const baseTiers = svc?.tiers ?? {};
+const tierNames = Object.keys(baseTiers);
 if (!tierNames.length) {
   bad('没有档位');
 } else {
-  for (const [name, t] of Object.entries(tiers)) {
-    const sid = String(t.serviceId ?? '');
-    const price = String(t.unitPrice ?? '');
+  for (const [name, t] of Object.entries(baseTiers)) {
+    const ov = idsOverlay[name] ?? {};
+    const sid = String(ov.serviceId ?? t.serviceId ?? '');
+    const price = String(ov.unitPrice ?? t.unitPrice ?? '');
     if (sid === 'api_mock_service_id') bad(`档位 ${name} 的 serviceId 仍是沙箱占位符`);
     else if (!sid) bad(`档位 ${name} 缺少 serviceId`);
-    else ok(`档位 ${name}：serviceId=${sid.slice(0, 18)}… 单价 ¥${price}`);
+    else ok(`档位 ${name}：serviceId=${sid.slice(0, 18)}… 单价 ¥${price}${ov.serviceId ? '（覆盖层）' : ''}`);
 
     if (!/^\d+(\.\d{1,2})?$/.test(price)) bad(`档位 ${name} 单价格式非法：${price}`);
     else if (Number(price) < 0.01 || Number(price) > 50) bad(`档位 ${name} 单价超出 0.01–50 元：${price}`);
