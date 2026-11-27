@@ -13,7 +13,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const BASE = process.argv[2] ?? process.env.BASE_URL ?? 'https://121.43.80.231/sceneguide';
-const OUT = path.resolve('提交材料/渠道二维码');
+// 输出目录可用环境变量覆盖：验收脚本要重新生成到临时目录做**字节级比对**
+// （解码二维码需要额外依赖，而"重新生成的与提交的一致"就足以证明编码内容没变）。
+const OUT = process.env.QR_OUT ? path.resolve(process.env.QR_OUT) : path.resolve('提交材料/渠道二维码');
 fs.mkdirSync(OUT, { recursive: true });
 
 const refFile = path.resolve('config/invites.json');

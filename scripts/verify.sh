@@ -805,6 +805,17 @@ else
   grep '✗' /tmp/sg-honest.log | sed 's/^/      /'
 fi
 
+# ── 26. 渠道二维码指向（二维码没法用眼睛看出编码内容）──────────
+# 7 张分发二维码是 11-18 生成的；演示地址从那之后迁过一次（http 裸 IP → https 真证书）。
+# 做法：重新生成到临时目录，与提交的逐字节比对——PNG 编码确定性，字节一致 ⟺ 内容一致。
+step "26. 渠道二维码指向校验"
+if node "$SCRIPT_DIR/verify-channel-qr.mjs" > /tmp/sg-qr.log 2>&1; then
+  ok "7 张渠道二维码全部指向现行地址（重新生成逐字节一致，见 scripts/verify-channel-qr.mjs）"
+else
+  bad "渠道二维码可能指向过期地址（node scripts/verify-channel-qr.mjs 查看详情）"
+  grep '✗' /tmp/sg-qr.log | sed 's/^/      /'
+fi
+
 # ── 汇总 ────────────────────────────────────────────────────
 printf '\n%s\n' "────────────────────────────────────────────────────────"
 if [[ $FAIL -eq 0 ]]; then
