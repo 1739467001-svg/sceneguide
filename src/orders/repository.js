@@ -44,12 +44,37 @@ import Database from 'better-sqlite3';
  * 变更历史：2026-11-21 之前只看 source，导致每次跑 MCP 验收都在给
  * 「其中真实」充值——评委看到的真实付费数被作者自己的脚本抬高。
  */
+// 🔴 2026-11-27 补两条排除（此前漏了，导致「真实付费」被自己的验收脚本抬高）：
+//   ① `judge-%` —— scripts/judge-flow.mjs 是**冷访客**路径（全新 profile、无任何状态），
+//      它按设计不带访客身份，于是每一跑都生成一个新 visitor_id，前缀排除全部落空。
+//      修法：让它带 `sg_vid=judge-cold-<ts>` cookie —— 依然是冷访客（没有订单/额度/权益），
+//      只是**身份可识别**。「冷」指的是状态，不是匿名。
+//   ② `ref_code = 'selfcheck'` —— scripts/official-buyer-check.sh 调用**支付宝官方**买方脚本
+//       local_402_sandbox_pay.py，那个脚本不接受自定义 header/cookie，没法带身份。
+//      改由 URL 带 `ref=selfcheck` 让订单落到一个专用渠道码上，再按渠道码排除。
+//      ⚠️ 这个标记**只能用于排除、不能用于虚增**：它让一笔订单不计入真实付费，
+//         而虚增需要的是「把别人的订单算成自己的」，方向相反，所以没有作弊空间。
+//   教训：前缀排除只在「脚本走的是我们自己的端点」时有效；一旦脚本打的是**公开 402 端点**，
+//   就必须在**下单那一刻**留下可识别的身份，否则事后无从分辨。
 const SELF_TEST_SQL = `(source = 'demo'
        OR COALESCE(visitor_id, '') LIKE 'mcp-e2e-%'
        OR COALESCE(visitor_id, '') LIKE 'acct-%'
        OR COALESCE(visitor_id, '') LIKE 'verify-%'
        OR COALESCE(visitor_id, '') LIKE 'probe-%'
-       OR COALESCE(visitor_id, '') LIKE 'story-demo-%')`;
+       OR COALESCE(visitor_id, '') LIKE 'judge-%'
+       OR COALESCE(visitor_id, '') LIKE 'story-demo-%'
+       OR COALESCE(ref_code, '') = 'selfcheck'
+       -- ③ 沙箱交易号不是真实付款（2026-11-27 回溯修正用）
+       OR length(COALESCE(trade_no, '')) >= 30)`;
+// 关于第 ③ 条：官方口径的「真实付费」是「通过支付宝 AI 付达成的有效交易」，
+// 而**沙箱收银产生的是 mock 交易**——官方文档原话「沙箱环境不使用真实资金」。
+// 判别依据是交易号位数：实测沙箱 trade_no 是 **32 位**，生产真实交易号是 **28 位**
+// （见 scripts/first-trade-no.mjs 的同一条判别）。
+// 这条同时解决了历史污染：2026-11-27 之前，judge-flow 与 official-buyer-check
+// 打的都是公开 402 端点且不带身份，产生的订单全部落进了 paidReal
+// （线上实测 33 笔，逐笔查下来 100% 是自己的验收脚本造的）。
+// 按「沙箱交易号不计真实」一并回溯排除，不需要逐笔人工标注。
+// ⚠️ 一旦切到生产，真实交易拿到 28 位号，本条自然不再命中——不需要再改代码。
 
 /**
  * 「按时完成」判定：首站到末站的打卡时间差 ≤ 预估用时 × 1.5。

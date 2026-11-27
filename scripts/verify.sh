@@ -793,6 +793,18 @@ else
   grep '✗' /tmp/sg-limits.log | sed 's/^/      /'
 fi
 
+# ── 25. 数字诚信（展示给评委的数字不许被自己的验收抬高）────────
+# 2026-11-27 实测：线上 paidReal=33，逐笔查下来 100% 是 judge-flow 与
+# official-buyer-check 自己造的（打公开 402 端点、不带身份，绕过前缀排除）。
+# 官方规则明写「违规、虚假交易及刷量数据会取消评选资格」——这项必须守住。
+step "25. 数字诚信（自己的验收不得抬高 paidReal）"
+if node "$SCRIPT_DIR/verify-honest-numbers.mjs" > /tmp/sg-honest.log 2>&1; then
+  ok "数字诚信通过（三处展示自洽 + 跑一遍官方买方验收 paidReal 不上升，见 scripts/verify-honest-numbers.mjs）"
+else
+  bad "数字诚信有问题（node scripts/verify-honest-numbers.mjs 查看详情）"
+  grep '✗' /tmp/sg-honest.log | sed 's/^/      /'
+fi
+
 # ── 汇总 ────────────────────────────────────────────────────
 printf '\n%s\n' "────────────────────────────────────────────────────────"
 if [[ $FAIL -eq 0 ]]; then

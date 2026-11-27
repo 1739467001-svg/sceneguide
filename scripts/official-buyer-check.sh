@@ -13,6 +13,14 @@
 #   这比任何自建验收都更接近评委的真实检查路径：
 #   评委手上也有支付宝的买方技能/脚本。
 #
+# 🔴 2026-11-27：本脚本产生的订单必须能被自测口径排除。
+#   官方脚本 local_402_sandbox_pay.py **不接受自定义 header/cookie**，
+#   没法像 judge-flow.mjs 那样带 sg_vid；而它打的是**公开 402 端点**，
+#   于是每一跑都是一个查不出身份的新访客 —— 这些订单全部计入
+#   「真实付费用户数」，而站点把这个数字展示给评委（数字诚信问题）。
+#   修法：URL 带 `ref=selfcheck`，让订单落到专用渠道码上，
+#   仓储层按 ref_code 排除。该标记**只能用于排除、不能用于虚增**。
+#
 # 前置：本地装有官方 Skill（默认 ~/.agents/skills/alipay-aipay 或 ~/.claude/skills/alipay-aipay）
 # 用法：
 #   bash scripts/official-buyer-check.sh
@@ -70,8 +78,9 @@ printf "  目标：%s/api/v1/guide\n" "$BASE"
 printf "  买家：%s（沙箱 2088 账号）\n" "$BUYER_ID"
 
 LOG=$(mktemp)
+# ref=selfcheck：让本脚本造的订单落到专用渠道码，供自测口径排除（见文件头说明）
 python3 "$OFFICIAL" run \
-  --url "${BASE}/api/v1/guide?scene=zjgsu-xiasha&query=${QUERY}" \
+  --url "${BASE}/api/v1/guide?scene=zjgsu-xiasha&query=${QUERY}&ref=selfcheck" \
   --method GET \
   --buyer-id "$BUYER_ID" \
   --auto-complete \

@@ -3,6 +3,17 @@
  * 冷评委路径验收（judge-flow）
  *
  * 模拟一个**从未访问过**该站的评委，用全新浏览器 profile 走完整条路径：
+ *
+ * 🔴 关于「冷访客」的一处修正（2026-11-27）：
+ *   旧实现强调「无任何 cookie」，本意是模拟真实冷访客。但副作用是：
+ *   每一跑都生成一个**新的 visitor_id**，于是仓储层按 visitor_id 前缀的
+ *   自测排除（mcp-e2e-% / acct-% / verify-% …）全部落空——
+ *   我们自己的验收订单被计入「真实付费用户数」，站点把这个数字展示给评委。
+ *   （2026-11-27 实测：线上 paidReal=33，逐笔查下来 100% 是本脚本与
+ *     official-buyer-check.sh 自己造的，33 个互不相同的访客、每人 1 笔、全 ¥0.01。）
+ *   ⇒ 「冷」指的是**状态**（没有订单、没有额度、没有权益），不是**匿名**。
+ *     现在带 `sg_vid=judge-cold-<ts>` cookie：依然是全新访客，但身份可识别、
+ *     可被自测口径排除。
  *   落地页 → 输入问题 → 得到 402 支付挑战 → 一键支付 → 拿到导览结果
  *   → 生成核验卡 → 我的账户（订单/额度）→ 反馈墙留言
  *
@@ -64,6 +75,16 @@ const evalJs = async (expr, timeout = 15000) => {
   if (m.result?.exceptionDetails) return { __err: m.result.exceptionDetails.text };
   return m.result?.result?.value;
 };
+
+// 🔴 冷访客的身份标记：让本脚本产生的订单能被自测口径排除（见文件头说明）。
+//    必须放在 send/evalJs 定义**之后**——send 是 const，提前调用会撞 TDZ。
+//    不带它，每一跑都是一个「查不出身份」的新访客，真实付费数就被自己的验收抬高了。
+const JUDGE_VISITOR = `judge-cold-${Date.now().toString(36)}`;
+await send('Network.enable');
+await send('Network.setCookie', {
+  name: 'sg_vid', value: JUDGE_VISITOR,
+  domain: new URL(BASE).hostname, path: '/', secure: true,
+});
 
 await send('Runtime.enable');
 await send('Page.enable');
