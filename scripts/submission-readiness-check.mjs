@@ -181,10 +181,19 @@ else {
   const pages = (pdf.toString('latin1').match(/\/Type \/Page[^s]/g) || []).length;
   pages >= 1 ? ok(`介绍 PDF 可读（${pages} 页，${(pdf.length / 1048576).toFixed(1)} MB）`) : bad('介绍 PDF 解析不出页数');
 }
-const vids = fs.readdirSync(MAT).filter((f) => f.endsWith('.mp4') && f.includes('2026'));
-if (!vids.length) bad('缺少新版演示视频');
+// 只认「演示视频-…-<日期>.mp4」形制的现行版；存档的旧版一律忽略
+// （2026-11-27：目录里曾同时躺着三版视频，按文件名 sort().pop() 虽能挑对，
+//  但提交时人手滑就会选错——旧版首屏数字与「真实付费」口径都是过时的。）
+const vids = fs.readdirSync(MAT).filter((f) => /^演示视频-.*-\d{8}\.mp4$/.test(f));
+if (!vids.length) bad('缺少现行版演示视频（命名应为 演示视频-…-YYYYMMDD.mp4）');
 else {
   const v = vids.sort().pop();
+  // 现行版必须比所有存档版都新，否则说明录完没归档
+  const archives = fs.readdirSync(MAT).filter((f) => f.startsWith('存档-旧版-') && f.endsWith('.mp4'));
+  const newestArchive = archives.sort().pop();
+  if (newestArchive && v < newestArchive.replace(/^存档-旧版-/, '')) {
+    warn(`现行版 ${v} 看起来不比存档版 ${newestArchive} 新——确认没录完忘归档`);
+  }
   // ffprobe 的摘要写在 **stderr**，且以非 0 退出——必须合并两个流再解析
   let dur = 0;
   try {

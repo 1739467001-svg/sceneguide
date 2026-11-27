@@ -18,7 +18,7 @@
  * 用法：
  *   node scripts/record-demo.mjs                       # 默认拍线上 https://121.43.80.231/sceneguide
  *   BASE_URL=http://127.0.0.1:3000 node scripts/record-demo.mjs
- *   OUT=提交材料/演示视频-三维问路-SceneGuide-20261123.mp4 node scripts/record-demo.mjs
+ *   OUT=提交材料/演示视频-三维问路-SceneGuide-<日期>.mp4 node scripts/record-demo.mjs
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -26,7 +26,10 @@ import path from 'node:path';
 
 const BASE = (process.env.BASE_URL ?? 'https://121.43.80.231/sceneguide').replace(/\/$/, '');
 // 文件名统一用 YYYYMMDD（与既有物料命名一致，避免出现两份同内容不同名的视频）
-const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+// ⚠️ 用**本地日期**，不是 UTC：本机在 UTC+8，凌晨录的话 toISOString 会给前一天，
+//    于是「今天的视频」被命名成昨天——和评审包的命名错位，闸门按文件名挑最新会挑错。
+const now = new Date();
+const today = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
 const OUT = process.env.OUT
   ?? path.resolve(`提交材料/演示视频-三维问路-SceneGuide-${today}.mp4`);
 const WORK = process.env.WORK ?? '/tmp/sg-record';
