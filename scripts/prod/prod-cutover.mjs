@@ -166,6 +166,39 @@ try {
   else bad(`prod-check 执行异常：${err.message}`);
 }
 
+// ── ④b 真实预下单实测（2026-11-28 新增）────────────────────
+// 切生产是「唯一不可逆」的一步：密钥/签名/service_id 任何一处填错，
+// 表现都是**每一笔支付被拒**而不是启动失败——第一个信号不能等到切完之后。
+// 本步骤用真实密钥对真实网关真调一次 precreate（会创建一笔立即过期的
+// 挂单，无资金流动），把「密钥对不对、预下单通不通」提前到切换之前。
+// 🔴 precreate-check 曾直接读 services.json 基础表误报「沙箱占位符」，
+//    现已改为 loadServices({env:'production'}) 走覆盖层（2026-11-28 修正）。
+step('④b 真实预下单实测（真实密钥 → 真实网关）');
+{
+  const prodFileChk = path.join(ROOT, 'config', 'production.json');
+  const hasKeys = fs.existsSync(prodFileChk)
+    && !/FILL_ME/.test(fs.readFileSync(prodFileChk, 'utf8').slice(0, 400));
+  if (!hasKeys) {
+    warn('跳过：config/production.json 尚未填入真实密钥（填好后重跑本 --check）');
+  } else {
+    try {
+      const out = run('node', [path.join(ROOT, 'scripts', 'prod', 'precreate-check.mjs')], { cwd: ROOT });
+      const passed = /全部通过/.test(out);
+      passed
+        ? ok('真实预下单通过：密钥/签名/service_id 在真实网关全部有效')
+        : bad('真实预下单未通过——切生产前必须解决（详见上方 precreate-check 输出）');
+      if (/amt_pre_pay_id = /.test(out)) {
+        const id = out.match(/amt_pre_pay_id = (\S+)/)?.[1] ?? '';
+        ok(`amt_pre_pay_id 字段实测确认：${id.slice(0, 24)}…`);
+      }
+    } catch (err) {
+      const out = `${err.stdout ?? ''}${err.stderr ?? ''}`;
+      if (/有 \d+ 项未通过/.test(out)) bad('真实预下单未通过——切生产前必须解决（详见上方输出）');
+      else bad(`precreate-check 执行异常：${err.message}`);
+    }
+  }
+}
+
 if (!APPLY) {
   console.log(`\n${failed ? R : G}${failed ? `体检未通过：${failed} 项` : '体检通过（未执行切换，用 --apply 生效）'}${N}`);
   process.exit(failed ? 1 : 0);

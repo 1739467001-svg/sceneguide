@@ -31,7 +31,6 @@ const warn = (m) => console.log(`  ${Y}! ${m}${N}`);
 const step = (m) => console.log(`\n${C}▸ ${m}${N}`);
 
 const prodFile = path.join(ROOT, 'config', 'production.json');
-const servicesFile = path.join(ROOT, 'config', 'services.json');
 
 step('1. 生产配置');
 if (!fs.existsSync(prodFile)) {
@@ -49,11 +48,14 @@ if (!fs.existsSync(prodFile)) {
   const { toPem } = await import('../../src/a2m/protocol.js');
   void toPem;
 
-  const svc = JSON.parse(fs.readFileSync(servicesFile, 'utf8'));
-  const tiers = svc?.tiers ?? {};
+  // 🔴 档位必须取**生产覆盖层**（config/services.production.json，经 loadServices 合成），
+  //    不能直接读 services.json——基础表的 serviceId 恒为沙箱占位符，
+  //    旧实现会误报「还是沙箱占位符」并中止真实预下单实测（2026-11-28 修正）。
+  const svcMod = await import('../../src/config.js');
+  const tiers = svcMod.loadServices({ env: 'production' });
   const tierName = process.env.TIER ?? Object.keys(tiers)[0];
   const tier = tiers[tierName];
-  if (!tier) bad(`没有可用档位（services.json 为空）`);
+  if (!tier) bad('没有可用档位（生产覆盖层为空）');
   else {
     if (String(tier.serviceId) === 'api_mock_service_id') {
       bad(`档位 ${tierName} 的 serviceId 还是沙箱占位符——预下单必须用生产 service_id`);
