@@ -211,6 +211,8 @@ function renderOrders(orders) {
       const actions = [];
       if (o.fulfillStatus === 'FULFILLED' && o.refundStatus !== 'REFUNDED') {
         actions.push(`<button class="copy-btn" data-verify="${esc(o.outTradeNo)}">核验卡</button>`);
+        // 用量结算单（RSA2 签名）：买家自己也能核对每笔订单的实际用量
+        actions.push(`<a class="copy-btn" style="text-decoration:none" href="api/v1/settlement/${esc(o.outTradeNo)}" target="_blank" rel="noopener">结算单</a>`);
         actions.push(`<button class="copy-btn" data-refund="${esc(o.outTradeNo)}">申请退款</button>`);
       }
       return `<tr>

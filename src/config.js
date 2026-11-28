@@ -6,7 +6,7 @@ export const ROOT = path.resolve(import.meta.dirname, '..');
 const SANDBOX_FILE = path.join(ROOT, '.alipay-sandbox.json');
 // ⚠️ 路径可用环境变量覆盖（ALIPAY_PRODUCTION_CONFIG / ALIPAY_SERVICES_CONFIG）：
 //    生产模式无法在真实生产机上反复试错，而「生产分支的契约」必须能离线验证
-//    ——scripts/prod-pay-ux-check.mjs 就是用临时配置起一个本地生产实例跑契约检查。
+//    ——scripts/prod/prod-pay-ux-check.mjs 就是用临时配置起一个本地生产实例跑契约检查。
 const PRODUCTION_FILE = process.env.ALIPAY_PRODUCTION_CONFIG
   ? path.resolve(process.env.ALIPAY_PRODUCTION_CONFIG)
   : path.join(ROOT, 'config', 'production.json');
@@ -93,7 +93,7 @@ export function loadProductionConfig() {
     buyerUserId: null,
     gateway: raw.gateway ?? 'https://openapi.alipay.com/gateway.do',
     // 官方预下单形态（amtPaymentLink）开关。默认关闭：
-    // 官方未公开完整响应 JSON，先用 scripts/precreate-check.mjs 实测确认字段名再打开。
+    // 官方未公开完整响应 JSON，先用 scripts/prod/precreate-check.mjs 实测确认字段名再打开。
     precreate: {
       enabled: raw.precreate?.enabled === true,
     },

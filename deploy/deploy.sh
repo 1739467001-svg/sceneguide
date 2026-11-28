@@ -83,7 +83,7 @@ if [[ "$TARGET" == "sg60" || "$TARGET" == "aliyun" ]]; then
   done
   if [[ -n "$OK" ]]; then
     echo "✓ 发布成功"
-    echo "  公网验收：BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh（76 项）"
+    echo "  公网验收：BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh（92 项）"
     echo "  回滚：ssh ${HOST} 'cd ${APP_DIR} && cp app/app.bak-<date>.tar.gz app/ && docker compose up -d --force-recreate'"
 
     # ── 5.5 环境闸门：切生产后自检（沙箱部署则只提示不阻塞）──
@@ -93,7 +93,7 @@ if [[ "$TARGET" == "sg60" || "$TARGET" == "aliyun" ]]; then
     #    都会在评审现场变成拒单或计 0。
     echo ""
     echo "▸ 生产就绪自检（prod-check）"
-    if node "$PWD/scripts/prod-check.mjs" 2>&1 | sed 's/^/  /'; then
+    if node "$PWD/scripts/prod/prod-check.mjs" 2>&1 | sed 's/^/  /'; then
       echo "  ✓ 生产配置自检通过"
     else
       echo "  ⚠ 生产配置自检未全绿——若当前是沙箱部署可忽略；切生产前必须清零上述阻塞项"

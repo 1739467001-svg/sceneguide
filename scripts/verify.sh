@@ -64,11 +64,11 @@ fi
 # ── 0. 服务可达 ────────────────────────────────────────────
 step "0. 离线协议自检（不依赖沙箱）"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if node "$SCRIPT_DIR/smoke.js" > /tmp/sg-smoke.log 2>&1; then
+if node "$SCRIPT_DIR/test/smoke.js" > /tmp/sg-smoke.log 2>&1; then
   SMOKE_N=$(grep -c '✓' /tmp/sg-smoke.log || true)
   ok "离线自检全部通过（${SMOKE_N} 项：场景内核 / 402 协议 / 商家签名 / 幂等 / 内核边界回归）"
 else
-  bad "离线自检存在失败项（node scripts/smoke.js 查看详情）"
+  bad "离线自检存在失败项（node scripts/test/smoke.js 查看详情）"
   tail -5 /tmp/sg-smoke.log | sed 's/^/      /'
 fi
 
@@ -147,6 +147,38 @@ METERS=$(node -e "
 for m in guide_call tokens distance_m; do
   if [[ ",$METERS," == *",$m,"* ]]; then ok "计量维度 $m 有累计"; else bad "缺少计量维度 $m"; fi
 done
+
+# ── 4.5 用量结算单：RSA2 签名 + 离线核验 ────────────────────
+# Machine Pay 赛道定义「以可核验用量完成结算」的落地证据：
+# 结算单 = 规范语句（key 字典序 k=v&，与 Payment-Needed 账单同一套签名纪律）
+#          + 商家 RSA2 签名 + 商家公钥（SPKI PEM）+ openssl 核验步骤。
+# 本节在本进程里完整复演**第三方**核验：验签必须通过，且对语句任何字符的
+# 篡改验签必须失败——两头都成立才算「可核验」。
+step "4.5 用量结算单（RSA2 签名 + 第三方视角核验）"
+if [[ -n "$ORDER" ]]; then
+  SETTLE=$("${CURL[@]}" "$BASE/api/v1/settlement/$ORDER")
+  SETTLE_NODE=$(node -e "
+    try{
+      const j=JSON.parse(process.argv[1]);
+      if(!j.statement||!j.signature||!j.seller_public_key)process.exit(2);
+      const crypto=require('node:crypto');
+      const okVerify=crypto.createVerify('RSA-SHA256').update(j.statement,'utf8')
+        .verify(j.seller_public_key,j.signature,'base64');
+      // 篡改复测：把语句第一个字符换成另一个字符，验签必须失败
+      const badVerify=crypto.createVerify('RSA-SHA256')
+        .update(j.statement.replace(/^./,(c)=>(c==='0'?'1':'0')),'utf8')
+        .verify(j.seller_public_key,j.signature,'base64');
+      console.log(okVerify&&!badVerify?'OK':'MISMATCH');
+    }catch(e){process.exit(1)}
+  " "$SETTLE" 2>/dev/null)
+  if [[ "$SETTLE_NODE" == "OK" ]]; then
+    ok "结算单验签通过 + 篡改必红（第三方离线可复算，statement/signature/public_key 齐备）"
+  else
+    bad "用量结算单验签异常：$(head -c 140 <<<"$SETTLE")"
+  fi
+else
+  bad "无已支付订单可出结算单"
+fi
 
 # ── 5. 场景数据真实性 ───────────────────────────────────────
 step "5. 场景数据与可核验性"
@@ -570,21 +602,21 @@ if [[ "$ALIVE" == "1" ]]; then ok "结果区 aria-live（读屏可达）"; else 
 # ── 16. MCP Agent 链路（tools/list → 真实 402 → 沙箱收银 → 带凭证交付 → 幂等重放）──
 step "16. MCP Agent 链路（端到端）"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if BASE_URL="$BASE" node "$SCRIPT_DIR/verify-mcp-flow.mjs" > /tmp/sg-mcp-flow.log 2>&1; then
+if BASE_URL="$BASE" node "$SCRIPT_DIR/verify/verify-mcp-flow.mjs" > /tmp/sg-mcp-flow.log 2>&1; then
   MCP_N=$(grep -c '✓' /tmp/sg-mcp-flow.log || true)
-  ok "MCP Agent 链路全部通过（${MCP_N} 项，见 scripts/verify-mcp-flow.mjs）"
+  ok "MCP Agent 链路全部通过（${MCP_N} 项，见 scripts/verify/verify-mcp-flow.mjs）"
 else
-  bad "MCP Agent 链路存在失败项（node scripts/verify-mcp-flow.mjs 查看详情）"
+  bad "MCP Agent 链路存在失败项（node scripts/verify/verify-mcp-flow.mjs 查看详情）"
   tail -5 /tmp/sg-mcp-flow.log | sed 's/^/      /'
 fi
 
 # ── 17. 买家账户中心（买包 → 转赠 → 兑换 → 余额交付 → 撤销 → 退款回收）──
 step "17. 买家账户中心（端到端）"
-if BASE_URL="$BASE" node "$SCRIPT_DIR/verify-account-flow.mjs" > /tmp/sg-acct-flow.log 2>&1; then
+if BASE_URL="$BASE" node "$SCRIPT_DIR/verify/verify-account-flow.mjs" > /tmp/sg-acct-flow.log 2>&1; then
   ACCT_N=$(grep -c '✓' /tmp/sg-acct-flow.log || true)
-  ok "买家账户中心全部通过（${ACCT_N} 项，见 scripts/verify-account-flow.mjs）"
+  ok "买家账户中心全部通过（${ACCT_N} 项，见 scripts/verify/verify-account-flow.mjs）"
 else
-  bad "买家账户中心存在失败项（node scripts/verify-account-flow.mjs 查看详情）"
+  bad "买家账户中心存在失败项（node scripts/verify/verify-account-flow.mjs 查看详情）"
   tail -5 /tmp/sg-acct-flow.log | sed 's/^/      /'
 fi
 
@@ -616,11 +648,11 @@ if echo "$LEAD_LONG" | grep -q '60 字以内'; then ok "超长机构名被拒（
 # 这一节用**全新浏览器 profile** 走一遍提交表单「如何获取作品」承诺的 7 步。
 step "18.5 冷评委路径（全新访客走完 7 步）"
 if [[ -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ]]; then
-  if node "$SCRIPT_DIR/judge-flow.mjs" > /tmp/sg-judge-flow.log 2>&1; then
+  if node "$SCRIPT_DIR/prod/judge-flow.mjs" > /tmp/sg-judge-flow.log 2>&1; then
     JF_N=$(grep -c '✓' /tmp/sg-judge-flow.log || true)
     ok "冷评委路径全部通过（${JF_N} 项：落地 → 402 挑战 → 支付 → 交付 → 核验卡 → 账户 → 反馈 → 场景切换）"
   else
-    bad "冷评委路径存在失败项（node scripts/judge-flow.mjs 查看详情）"
+    bad "冷评委路径存在失败项（node scripts/prod/judge-flow.mjs 查看详情）"
     tail -12 /tmp/sg-judge-flow.log | sed 's/^/      /'
   fi
 else
@@ -634,7 +666,7 @@ fi
 # 结论由官方脚本自己给出（「AI 按量付费沙箱服务端联调通过」）——
 # 也就是：我们的服务被主办方官方工具端到端买通了。
 step "18.6 官方买方脚本验收（支付宝官方脚本买通本服务）"
-if bash "$SCRIPT_DIR/official-buyer-check.sh" > /tmp/sg-official-buyer.log 2>&1; then
+if bash "$SCRIPT_DIR/prod/official-buyer-check.sh" > /tmp/sg-official-buyer.log 2>&1; then
   ok "支付宝官方买方脚本端到端买通本服务（官方脚本自判定「AI 按量付费沙箱服务端联调通过」）"
   grep -E 'trade_no|商户订单号' /tmp/sg-official-buyer.log | sed 's/^ *✓ */      /'
 elif [[ $? -eq 3 || $? -eq 3 ]]; then
@@ -649,7 +681,7 @@ fi
 # 与沙箱完全不同。前端若按沙箱逻辑处理，评委点支付会看到自相矛盾的提示。
 # 这里用一把**运行时生成的临时 RSA 密钥**起一个本地生产实例，把契约逐字段验一遍。
 step "18.7 生产模式支付契约（本地生产实例，离线）"
-if node "$SCRIPT_DIR/prod-pay-ux-check.mjs" > /tmp/sg-prod-ux.log 2>&1; then
+if node "$SCRIPT_DIR/prod/prod-pay-ux-check.mjs" > /tmp/sg-prod-ux.log 2>&1; then
   PU_N=$(grep -c '✓' /tmp/sg-prod-ux.log || true)
   ok "生产模式支付契约通过（${PU_N} 项：402 挑战 + 409 契约 + 前端渲染字段 + meta.env）"
 else
@@ -657,18 +689,20 @@ else
   tail -12 /tmp/sg-prod-ux.log | sed 's/^/      /'
 fi
 
-# ── 18.8 官方支付异步通知（AP_NOTIFY_URL / notify_url）───────
-# 官方《支付 MCP Server》的 AP_NOTIFY_URL 由**商家自己提供**——也就是本服务提供。
-# 官方要求「支付结果以异步通知或查询接口为准，不能依赖同步跳转」。
-# 本项验证：合法通知推进状态机 / 重复通知幂等 / 金额篡改被拒 / 非成功状态不推进 /
-#           **通知不发放资源**（伪造通知拿不到内容）。
-step "18.8 官方支付异步通知（notify_url 通道）"
-if node "$SCRIPT_DIR/notify-check.mjs" > /tmp/sg-notify.log 2>&1; then
-  NC_N=$(grep -c '✓' /tmp/sg-notify.log || true)
-  ok "官方异步通知通道通过（${NC_N} 项：推进/幂等/防篡改/状态判定/不越权交付）"
+# ── 18.8 A2M 契约纯度审计（2026-11-28 接替原「异步通知」节）────
+# 官方《A2M 接口契约》原文：按量付费只实现 HTTP 402、Payment-Needed、Payment-Proof、
+# payment.verify 和 fulfillment.confirm，**不得混入**网页/移动收款的统一收单接口、
+# 异步通知及其回调地址。本项验证：统一收单接口零调用 / notify 通道未复活 /
+# 商家 OpenAPI 调用面恰好等于官方允许集合 / 对外物料不再宣传通知通道 /
+# 协议内结果感知双通道在位。
+# （决策留痕见 src/orders/repository.js：原异步通知端点因契约合规于 2026-11-28 下线。）
+step "18.8 A2M 契约纯度审计"
+if node "$SCRIPT_DIR/prod/contract-purity-check.mjs" > /tmp/sg-contract-purity.log 2>&1; then
+  CP_N=$(grep -c '✓' /tmp/sg-contract-purity.log || true)
+  ok "A2M 契约纯度通过（${CP_N} 项：无混入/通知不复活/接口面=官方集合/物料净化/双通道在位）"
 else
-  bad "官方异步通知通道存在失败项"
-  tail -12 /tmp/sg-notify.log | sed 's/^/      /'
+  bad "A2M 契约纯度审计存在失败项"
+  tail -12 /tmp/sg-contract-purity.log | sed 's/^/      /'
 fi
 
 # ── 18.9 协议层单元自检（纯函数，不依赖网络）─────────────────
@@ -676,7 +710,7 @@ fi
 #   履约回执幂等成功识别 / 官方 8 字段签名集 / Base64URL 形态。
 # 2026-11-23 由本节抓出「空白值未按官方 Java trim 跳过」的签名不一致 bug。
 step "18.9 协议层单元自检"
-if node "$SCRIPT_DIR/protocol-unit-check.mjs" > /tmp/sg-protocol-unit.log 2>&1; then
+if node "$SCRIPT_DIR/prod/protocol-unit-check.mjs" > /tmp/sg-protocol-unit.log 2>&1; then
   PU_N=$(grep -c '✓' /tmp/sg-protocol-unit.log || true)
   ok "协议层单元自检通过（${PU_N} 项：回执幂等识别 / 官方 8 字段签名集 / Base64URL 形态）"
 else
@@ -691,7 +725,7 @@ fi
 # 本项：线上 https 入口产出官方可吃的 402 账单（14 个必需字段齐全）
 #       + 静态审计提交物料里没有裸 http 的演示地址。
 step "18.10 付费资源 HTTPS 硬约束"
-if node "$SCRIPT_DIR/https-hard-constraint-check.mjs" > /tmp/sg-https-hard.log 2>&1; then
+if node "$SCRIPT_DIR/prod/https-hard-constraint-check.mjs" > /tmp/sg-https-hard.log 2>&1; then
   HS_N=$(grep -c '✓' /tmp/sg-https-hard.log || true)
   ok "HTTPS 硬约束通过（${HS_N} 项：官方可吃的 402 账单 + 物料地址审计）"
 else
@@ -706,7 +740,7 @@ fi
 #   介绍 PDF 与演示视频可用 / **附件包内每个文件都不早于其源文件**（打包时机）/ 收款方账号一致
 # ⚠️ 它会报「AI 付接入凭证仍待填」——那正是签约后的最后一步，属预期提醒。
 step "18.11 提交就绪闸门"
-if node "$SCRIPT_DIR/submission-readiness-check.mjs" > /tmp/sg-submission-ready.log 2>&1; then
+if node "$SCRIPT_DIR/build/submission-readiness-check.mjs" > /tmp/sg-submission-ready.log 2>&1; then
   SR_N=$(grep -c '✓' /tmp/sg-submission-ready.log || true)
   ok "提交就绪检查通过（${SR_N} 项：字段字数/价格一致/地址可用/实物完整/附件包时机/账号一致）"
   grep '!' /tmp/sg-submission-ready.log | sed 's/^ *//;s/^/      /' || true
@@ -720,7 +754,7 @@ fi
 # 那是指引**承诺的入口**——若 UI 改版后某个按钮/区块消失，评委就会在第 3 步卡住。
 # 本项用无头浏览器逐条核对指引里提到的每个入口是否真的存在。
 step "18.12 评委指引 7 步入口核对"
-if node "$SCRIPT_DIR/judge-path-check.mjs" > /tmp/sg-judge-path.log 2>&1; then
+if node "$SCRIPT_DIR/prod/judge-path-check.mjs" > /tmp/sg-judge-path.log 2>&1; then
   ok "评委指引 7 步入口全部对得上（首屏终端/查询/试看/支付/核验卡/账户/场景切换）"
 else
   bad "评委指引与实际入口对不上——评委会在中途卡住"
@@ -739,10 +773,10 @@ fi
 
 # ── 20. 三维渲染完整性（浏览器层：建筑对齐 + 无 NaN 黑屏）────────
 step "20. 三维渲染完整性（浏览器层）"
-if node "$SCRIPT_DIR/verify-render.mjs" > /tmp/sg-render.log 2>&1; then
-  ok "三维渲染完整性通过（建筑对齐 footprint / demo-park 不黑屏，见 scripts/verify-render.mjs）"
+if node "$SCRIPT_DIR/verify/verify-render.mjs" > /tmp/sg-render.log 2>&1; then
+  ok "三维渲染完整性通过（建筑对齐 footprint / demo-park 不黑屏，见 scripts/verify/verify-render.mjs）"
 else
-  bad "三维渲染完整性存在失败项（node scripts/verify-render.mjs 查看详情）"
+  bad "三维渲染完整性存在失败项（node scripts/verify/verify-render.mjs 查看详情）"
   tail -5 /tmp/sg-render.log | sed 's/^/      /'
 fi
 
@@ -750,10 +784,10 @@ fi
 # 官方细则：「作品影响力 = 参赛作品详情页在支付宝 AI 付官网的浏览、点赞、评论」。
 # ⇒ 核验卡/收据必须能把买家引到官方作品页，否则 20% 引不到落点。
 step "21. 官方作品页分享链路（核验卡/收据 → 官方作品页）"
-if node "$SCRIPT_DIR/verify-community-share.mjs" > /tmp/sg-community.log 2>&1; then
-  ok "官方作品页分享链路通过（模块降级 / 二维码 / 接口接线 / 前端渲染 / 配置提醒，见 scripts/verify-community-share.mjs）"
+if node "$SCRIPT_DIR/verify/verify-community-share.mjs" > /tmp/sg-community.log 2>&1; then
+  ok "官方作品页分享链路通过（模块降级 / 二维码 / 接口接线 / 前端渲染 / 配置提醒，见 scripts/verify/verify-community-share.mjs）"
 else
-  bad "官方作品页分享链路存在失败项（node scripts/verify-community-share.mjs 查看详情）"
+  bad "官方作品页分享链路存在失败项（node scripts/verify/verify-community-share.mjs 查看详情）"
   grep '✗' /tmp/sg-community.log | sed 's/^/      /'
 fi
 
@@ -762,10 +796,10 @@ fi
 # 「unbound variable」，而且常常恰好炸在**出错分支**上（报错语句自己崩）。
 # 检测器自带自检：先真的复现一次，确认它抓得到，再信它的绿灯。
 step "22. Shell 脚本 Unicode 变量名检测"
-if node "$SCRIPT_DIR/verify-shell-unicode.mjs" > /tmp/sg-shell-unicode.log 2>&1; then
-  ok "Shell 脚本无「\$变量后紧跟非 ASCII」问题（检测器已自检，见 scripts/verify-shell-unicode.mjs）"
+if node "$SCRIPT_DIR/verify/verify-shell-unicode.mjs" > /tmp/sg-shell-unicode.log 2>&1; then
+  ok "Shell 脚本无「\$变量后紧跟非 ASCII」问题（检测器已自检，见 scripts/verify/verify-shell-unicode.mjs）"
 else
-  bad "Shell 脚本存在 Unicode 变量名问题（node scripts/verify-shell-unicode.mjs 查看详情）"
+  bad "Shell 脚本存在 Unicode 变量名问题（node scripts/verify/verify-shell-unicode.mjs 查看详情）"
   grep '✗' /tmp/sg-shell-unicode.log | sed 's/^/      /'
 fi
 
@@ -774,10 +808,10 @@ fi
 # 最容易错又最难事后看出的是「拿错交易号」（沙箱 32 位 / 生产 28 位）
 # 与「脚本写的槽位和就绪包预留的对不上」——这两件都能离线测出来。
 step "23. 生产切换链路契约自检"
-if node "$SCRIPT_DIR/verify-prod-cutover.mjs" > /tmp/sg-cutover.log 2>&1; then
-  ok "生产切换链路契约通过（28 位交易号筛选 / 槽位格式一致 / 缺配置拒绝切 / 私钥不回显，见 scripts/verify-prod-cutover.mjs）"
+if node "$SCRIPT_DIR/verify/verify-prod-cutover.mjs" > /tmp/sg-cutover.log 2>&1; then
+  ok "生产切换链路契约通过（28 位交易号筛选 / 槽位格式一致 / 缺配置拒绝切 / 私钥不回显，见 scripts/verify/verify-prod-cutover.mjs）"
 else
-  bad "生产切换链路契约有问题（node scripts/verify-prod-cutover.mjs 查看详情）"
+  bad "生产切换链路契约有问题（node scripts/verify/verify-prod-cutover.mjs 查看详情）"
   grep '✗' /tmp/sg-cutover.log | sed 's/^/      /'
 fi
 
@@ -786,10 +820,10 @@ fi
 # amount ≤ 50 元；pay_before 不超过当前 12h。这些沙箱不一定拦，切生产后超限
 # 只会换来一个笼统的业务失败码。验的是**线上真实 402 里的实发值**。
 step "24. 官方接口字段限额（线上真实 402 实发值）"
-if node "$SCRIPT_DIR/verify-official-limits.mjs" > /tmp/sg-limits.log 2>&1; then
-  ok "官方字段限额全部合规（out_trade_no 29/32 · goods_name ≤19/32 · service_id ≤21/32 · pay_before 30 分钟，见 scripts/verify-official-limits.mjs）"
+if node "$SCRIPT_DIR/verify/verify-official-limits.mjs" > /tmp/sg-limits.log 2>&1; then
+  ok "官方字段限额全部合规（out_trade_no 29/32 · goods_name ≤19/32 · service_id ≤21/32 · pay_before 30 分钟，见 scripts/verify/verify-official-limits.mjs）"
 else
-  bad "官方字段限额存在越界项（node scripts/verify-official-limits.mjs 查看详情）"
+  bad "官方字段限额存在越界项（node scripts/verify/verify-official-limits.mjs 查看详情）"
   grep '✗' /tmp/sg-limits.log | sed 's/^/      /'
 fi
 
@@ -798,10 +832,10 @@ fi
 # official-buyer-check 自己造的（打公开 402 端点、不带身份，绕过前缀排除）。
 # 官方规则明写「违规、虚假交易及刷量数据会取消评选资格」——这项必须守住。
 step "25. 数字诚信（自己的验收不得抬高 paidReal）"
-if node "$SCRIPT_DIR/verify-honest-numbers.mjs" > /tmp/sg-honest.log 2>&1; then
-  ok "数字诚信通过（三处展示自洽 + 跑一遍官方买方验收 paidReal 不上升，见 scripts/verify-honest-numbers.mjs）"
+if node "$SCRIPT_DIR/verify/verify-honest-numbers.mjs" > /tmp/sg-honest.log 2>&1; then
+  ok "数字诚信通过（三处展示自洽 + 跑一遍官方买方验收 paidReal 不上升，见 scripts/verify/verify-honest-numbers.mjs）"
 else
-  bad "数字诚信有问题（node scripts/verify-honest-numbers.mjs 查看详情）"
+  bad "数字诚信有问题（node scripts/verify/verify-honest-numbers.mjs 查看详情）"
   grep '✗' /tmp/sg-honest.log | sed 's/^/      /'
 fi
 
@@ -809,17 +843,17 @@ fi
 # 7 张分发二维码是 11-18 生成的；演示地址从那之后迁过一次（http 裸 IP → https 真证书）。
 # 做法：重新生成到临时目录，与提交的逐字节比对——PNG 编码确定性，字节一致 ⟺ 内容一致。
 step "26. 渠道二维码指向校验"
-if node "$SCRIPT_DIR/verify-channel-qr.mjs" > /tmp/sg-qr.log 2>&1; then
-  ok "7 张渠道二维码全部指向现行地址（重新生成逐字节一致，见 scripts/verify-channel-qr.mjs）"
+if node "$SCRIPT_DIR/verify/verify-channel-qr.mjs" > /tmp/sg-qr.log 2>&1; then
+  ok "7 张渠道二维码全部指向现行地址（重新生成逐字节一致，见 scripts/verify/verify-channel-qr.mjs）"
 else
-  bad "渠道二维码可能指向过期地址（node scripts/verify-channel-qr.mjs 查看详情）"
+  bad "渠道二维码可能指向过期地址（node scripts/verify/verify-channel-qr.mjs 查看详情）"
   grep '✗' /tmp/sg-qr.log | sed 's/^/      /'
 fi
 
 # ── 27. 介绍文档 PDF 与 HTML 源一致（渲染产物最容易漂移）────────
 # 2026-11-27 发现：PDF 里写「84 项」而 HTML 源早已是「88 项」——PDF 停留在 11-24
 # 那次渲染，之后又加了 4 项验收。评委拿的是 PDF，站点写的是 88，一眼看出文档没跟着代码走。
-# 重渲：bash scripts/build-intro-pdf.sh
+# 重渲：bash scripts/build/build-intro-pdf.sh
 step "27. 介绍文档 PDF 与 HTML 源一致"
 PDF_MD="${SCRIPT_DIR%/scripts}/提交材料/作品介绍文档.pdf"
 HTML_MD="${SCRIPT_DIR%/scripts}/提交材料/作品介绍文档.html"
@@ -831,7 +865,7 @@ else
   if printf '%s' "$PDF_TXT" | grep -q "${SRC_N} 项"; then
     ok "PDF 与 HTML 源计数一致（${SRC_N} 项）"
   else
-    bad "PDF 落后于 HTML 源（源为 ${SRC_N} 项）——跑 bash scripts/build-intro-pdf.sh 重渲"
+    bad "PDF 落后于 HTML 源（源为 ${SRC_N} 项）——跑 bash scripts/build/build-intro-pdf.sh 重渲"
   fi
 fi
 
@@ -840,10 +874,10 @@ fi
 # 被表现成服务端故障，评委手动改个 URL 就会看到「这服务不健壮」。
 # 已修：未知 tier 前置校验 → 400 + 合法取值清单。本项守住这条。
 step "28. 输入健壮性压测（17 个边界用例）"
-if node "$SCRIPT_DIR/verify-input-hardening.mjs" > /tmp/sg-input.log 2>&1; then
-  ok "输入健壮性通过（无 5xx：空/超长/注入/非法 tier·mode/同名起终点/尾随逗号，见 scripts/verify-input-hardening.mjs）"
+if node "$SCRIPT_DIR/verify/verify-input-hardening.mjs" > /tmp/sg-input.log 2>&1; then
+  ok "输入健壮性通过（无 5xx：空/超长/注入/非法 tier·mode/同名起终点/尾随逗号，见 scripts/verify/verify-input-hardening.mjs）"
 else
-  bad "输入健壮性有问题（node scripts/verify-input-hardening.mjs 查看详情）"
+  bad "输入健壮性有问题（node scripts/verify/verify-input-hardening.mjs 查看详情）"
   grep '✗' /tmp/sg-input.log | sed 's/^/      /'
 fi
 

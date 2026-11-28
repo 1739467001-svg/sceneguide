@@ -63,7 +63,7 @@ export function buildSignContent(params) {
     // ⚠️ 必须与官方 Java 参考实现逐字一致：`value != null && !value.trim().isEmpty()`
     //    ——**只判断 `!== ''` 不够**：只含空白的值（如 '  '）在官方被跳过，
     //    在我们这里却会参与签名 → 签名内容与官方不一致 → 验签失败。
-    //    （2026-11-23 由 scripts/protocol-unit-check.mjs 抓出）
+    //    （2026-11-23 由 scripts/prod/protocol-unit-check.mjs 抓出）
     .filter((key) => {
       const v = params[key];
       return v !== null && v !== undefined && String(v).trim() !== '';
@@ -78,6 +78,21 @@ export function rsaSign(signContent, privateKeyB64) {
     .createSign('RSA-SHA256')
     .update(signContent, 'utf8')
     .sign(parsePrivateKey(privateKeyB64), 'base64');
+}
+
+/**
+ * 导出卖家的 RSA 公钥（PEM / SPKI 格式），供第三方离线核验商家签名。
+ *
+ * 用途：402 账单（Payment-Needed 的 seller_signature）与用量结算单都由商家私钥
+ * RSA2 签名；买方 / 评委想**不经支付宝接口**亲手核验时需要这把公钥。
+ * 公钥本就是私钥的数学衍生物（公开信息），对外发布无任何风险。
+ * 出口：/api/v1/meta 的 protocol.seller_public_key 与
+ * /api/v1/settlement/:outTradeNo 的 seller_public_key 字段。
+ */
+export function exportSellerPublicKeyPem(privateKeyB64) {
+  const key = parsePrivateKey(privateKeyB64);
+  // 私钥 KeyObject 不能直接用 spki 导出（那是公钥编码）——先派生公钥对象
+  return crypto.createPublicKey(key).export({ type: 'spki', format: 'pem' }).toString().trim();
 }
 
 /** Base64URL 编码（去 padding，+ → -，/ → _） */

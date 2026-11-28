@@ -7,12 +7,15 @@ import {
   formatISO8601WithTimezone,
   normalizeAmount,
   amountsEqual,
+  buildSignContent,
+  rsaSign,
+  exportSellerPublicKeyPem,
 } from '../a2m/protocol.js';
 import { answerGuide, namedNodes } from '../scene/index.js';
 import { createQuest, issueCertificate } from '../scene/quest.js';
 import { getScene, listScenes } from '../scene/scenes.js';
 import { measure, priceFor, billingSummary } from '../metering/index.js';
-import { createMcpHandler } from '../mcp/server.js';
+import { createMcpHandler, TOOL_NAME } from '../mcp/server.js';
 // 任务评分统一由 repository.computeQuestScore 计算（单一实现）：
 // 证书里的分数与库里的 score 必须同源，否则「可复算核验」的卖点不成立。
 import { computeQuestScore } from '../orders/repository.js';
@@ -79,6 +82,16 @@ export function createGuideRouter({ repository, alipayClient, config, services, 
   const DEMO_PAY_DAILY_IP_LIMIT = Number(process.env.DEMO_PAY_DAILY_IP_LIMIT ?? 500);
   // 分钟级突发上限：单机高频刷爆（分钟上百次）立刻被拦，正常评审远低于此。
   const DEMO_PAY_MINUTE_IP_LIMIT = Number(process.env.DEMO_PAY_MINUTE_IP_LIMIT ?? 60);
+  /** 402 挑战防刷限流。
+   *  🔴 为什么必须有（2026-11-28 补）：公开付费端点此前是**唯一没有 IP 限流的
+   *  建单入口**——MCP 挑战 100/日、演示支付 500/日 + 60/分、免费试看 3/访客·日，
+   *  而它每次 GET 都真实建单（落库）+ RSA2 签名。脚本循环 GET 就能：
+   *  ① 把订单表刷爆（存储与看板被垃圾订单污染）；② 白烧服务端签名算力；
+   *  ③ 制造大量「永远 PENDING」的幽灵订单——官方反作弊条款明令剔除刷量数据，
+   *  看板口径必须干净。限额与演示支付同口径（500/日 + 60/分），
+   *  取值容忍 NAT（校园/公司 WiFi 几百人共享出口 IP 的评审场景），可用环境变量覆盖。 */
+  const CHALLENGE_DAILY_IP_LIMIT = Number(process.env.CHALLENGE_DAILY_IP_LIMIT ?? 500);
+  const CHALLENGE_MINUTE_IP_LIMIT = Number(process.env.CHALLENGE_MINUTE_IP_LIMIT ?? 60);
   /** 权益额度有效期（天）：多额度商品发放的次数余额在多久内有效 */
   const ENTITLEMENT_VALID_DAYS = 90;
 
@@ -203,6 +216,22 @@ function sanitizeVerifyError(raw) {
     // 「凭证无效或已过期，需重新支付」，而不是给一个看起来像「你还没付钱」的新账单）。
     const previousFailure = opts.previousFailure ?? null;
     try {
+      // 🔴 建单入口限流（口径见上方常量注释）：先于任何落库 / 签名动作
+      const challengeDay = ipLimit(req, 'challenge');
+      if (challengeDay !== null && challengeDay > CHALLENGE_DAILY_IP_LIMIT) {
+        return res.status(429).json({
+          code: 'CHALLENGE_LIMIT_REACHED',
+          message: `今日支付挑战次数已达上限（${CHALLENGE_DAILY_IP_LIMIT}），请明天再试。`,
+        });
+      }
+      const challengeMinute = ipMinuteLimit(req, 'challenge');
+      if (challengeMinute !== null && challengeMinute > CHALLENGE_MINUTE_IP_LIMIT) {
+        return res.status(429).json({
+          code: 'CHALLENGE_LIMIT_REACHED',
+          message: `支付挑战过于频繁（每分钟上限 ${CHALLENGE_MINUTE_IP_LIMIT}），请稍候再试。`,
+        });
+      }
+
       const { name, tier } = pickTier(req);
       const amount = priceFor(tier);
 
@@ -407,14 +436,26 @@ function sanitizeVerifyError(raw) {
       }
 
       // 沙箱模式下验付返回的部分字段可能为空，用本地订单回填；生产必须以验付结果为准
-      const sandboxMode =
-        config.gateway === 'https://openapi-sandbox.dl.alipaydev.com/gateway.do' &&
-        order.tier === 'single';
       const effectiveTradeNo = verifiedTradeNo || tradeNo;
       const effectiveAmount = verifiedAmount || order.amount;
       const effectiveResourceId = resourceId || order.resourceId;
 
-      // 五项业务核验
+      // 五项业务核验 —— 这就是官方 MACHINE_PAY.md 给出的**完整**清单
+      // （active / amount / out_trade_no / resource_id / trade_no 防重复履约），
+      // 与 docs/技术规格-A2M-402.md 的「五项核验」一一对应。
+      //
+      // 🔴 决策留痕（2026-11-28）：这里曾自作主张加了第 6 项——
+      //    `Date.parse(order.payBefore) <= Date.now()` → 400「支付已超时」，
+      //    还为它配了个「沙箱 + single 档豁免」的特例 hack。两处一并删除，理由：
+      //    ① 官方五项核验清单里**没有**支付时效检查——pay_before 的强制拦截
+      //       属于支付宝收银台（窗口外的支付根本完成不了），验付通过即代表
+      //       支付在窗口内完成；
+      //    ② 本地时钟检查反而制造**双倍扣款**：买家在第 29 分钟付款、Agent
+      //       第 31 分钟携凭证重试（完全合法），旧实现会拒绝交付并要求重新下单
+      //       ——钱已付、资源不给、再买一次再扣一笔。这正是「支付集成度」评分
+      //       里「交付闭环（付费后及时拿到服务）」最不能出现的形态；
+      //    ③ 那个豁免 hack 只对「沙箱 + single」生效，本身就说明它是症状补丁
+      //       而不是设计（其余档位在生产同样会踩双扣）。
       if (active !== true) {
         return res.status(400).json({ code: 'INVALID_PAYMENT_PROOF', message: '支付凭证无效或已过期' });
       }
@@ -426,9 +467,6 @@ function sanitizeVerifyError(raw) {
       }
       if (!effectiveResourceId || effectiveResourceId !== order.resourceId || effectiveResourceId !== RESOURCE_PATH) {
         return res.status(400).json({ code: 'RESOURCE_ID_MISMATCH', message: '资源标识不匹配' });
-      }
-      if (!sandboxMode && Date.parse(order.payBefore) <= Date.now()) {
-        return res.status(400).json({ code: 'INVALID_PAYMENT_PROOF', message: '支付已超时' });
       }
 
       // 幂等履约：资源只生成一次，履约回执失败时允许用同一笔 Payment-Proof 重试
@@ -746,10 +784,29 @@ function sanitizeVerifyError(raw) {
       const publicUrl = `${publicBaseUrl(req)}${RESOURCE_PATH}?${params}`;
       const visitorCookie = req.visitorId ? `sg_vid=${req.visitorId}` : '';
       const headers = { 'x-sg-ignore-entitlement': '1', ...(visitorCookie ? { Cookie: visitorCookie } : {}) };
-      const challengeRes = await fetch(internalUrl, { headers, signal: AbortSignal.timeout(15000) });
-      const paymentNeeded = challengeRes.headers.get('payment-needed');
-      const amtPaymentLink = challengeRes.headers.get('amtpaymentlink');
-      const body = await challengeRes.clone().json().catch(() => ({}));
+      // 🔴 内部回环必须兜住异常（2026-11-27 遍历审查发现）：
+      //    SELF_BASE_URL/PORT 配置不当、回环短暂不可用或超过 15s 时，
+      //    这个 fetch 会抛 TypeError/AbortError。旧实现这里没有 try/catch，
+      //    异常直接逃出 async handler → Express 默认错误中间件返回 **HTML 500 错误页**。
+      //    一个 API 端点返回 HTML，前端的 res.json() 会解析失败，用户看到的是
+      //    「页面崩了」而不是「这一步没成，但你可以这样付」——而 resource_url 本来
+      //    是能给出去的。沙箱分支（下方）一直有 try/catch，生产分支却漏了。
+      let challengeRes;
+      let challengeError = null;
+      try {
+        challengeRes = await fetch(internalUrl, { headers, signal: AbortSignal.timeout(15000) });
+      } catch (err) {
+        challengeError = err.name === 'TimeoutError' ? '内部回环超时（15s）' : err.message;
+      }
+
+      let paymentNeeded = null;
+      let amtPaymentLink = null;
+      let body = {};
+      if (challengeRes) {
+        paymentNeeded = challengeRes.headers.get('payment-needed');
+        amtPaymentLink = challengeRes.headers.get('amtpaymentlink');
+        body = await challengeRes.clone().json().catch(() => ({}));
+      }
       // 🔴 2026-11-27 修一个会**静默清零「商业化成熟度 25%」**的 bug：
       //    旧实现在这里调 repository.markSelfTest(out_trade_no)，把订单标成 source='demo'。
       //    但生产分支**并没有真的代付**（只是拿到 402 挑战就返回账单），
@@ -781,6 +838,9 @@ function sanitizeVerifyError(raw) {
         out_trade_no: body.out_trade_no ?? null,
         amount: body.amount ?? null,
         goods_name: body.goods_name ?? null,
+        // 回环失败时把原因带出来（resource_url 仍然有效，买家可直接 GET 它拿 402）。
+        // 没有这个字段的话，运维只能看到「按钮没反应」而不知道是回环配置问题。
+        ...(challengeError ? { challenge_error: `服务端内部回环失败：${challengeError}` } : {}),
         agent_instructions:
           'Agent：读取本次 402 响应的 Payment-Needed 头（原样，不解码不改动），'
           + '交给支付宝 alipay-pay-for-402-service 技能完成支付，然后携带 Payment-Proof 重试原请求。',
@@ -943,9 +1003,15 @@ function sanitizeVerifyError(raw) {
 
   router.post('/mcp', async (req, res) => {
     try {
-      // 只限流「会建单」的调用：带凭证的验付调用与 tools/list 不计
+      // 只限流「会建单」的调用：scene_guide 挑战（无凭证）才计数。
+      // 🔴 精准到工具名（2026-11-28）：旧实现把一切无 payment_proof 的 tools/call
+      //    都当挑战——scene_guide_scenes（目录）与 scene_guide_settlement（结算单
+      //    核对，免费只读）会被白扣 100/日 的挑战配额；带凭证的验付调用与
+      //    tools/list 本就不计。
       const isChallengeCall =
-        req.body?.method === 'tools/call' && !req.body?.params?.arguments?.payment_proof;
+        req.body?.method === 'tools/call'
+        && req.body?.params?.name === TOOL_NAME
+        && !req.body?.params?.arguments?.payment_proof;
       if (isChallengeCall) {
         const n = ipLimit(req, 'mcp_challenge');
         if (n !== null && n > MCP_CHALLENGE_DAILY_IP_LIMIT) {
@@ -984,6 +1050,86 @@ function sanitizeVerifyError(raw) {
       amount: order.amount,
       tier: order.tier,
     });
+  });
+
+  /**
+   * 用量结算单 —— 可离线核验的 Machine Pay 交付证据。
+   *
+   * Machine Pay 赛道定义原文：「让 AI 服务按实际使用量计费与支付，**以可核验用量
+   * 完成结算**」。「可核验」要落到第三方能亲手验证才算数：本端点把一笔已支付订单
+   * 的用量汇总成规范语句（key 字典序 `k=v&`、空值跳过——与 Payment-Needed 账单
+   * **同一套签名纪律**），用商家私钥 RSA2 签名，连同公钥与 openssl 核验步骤一起返回。
+   * 任何人拿到响应即可离线复算：对 statement 原文的任何篡改，验签必然失败。
+   *
+   * 与 402 交付的关系：结算单只「陈述用量」，不承载交付——资源仍只经
+   * Payment-Proof 验付路径发放；因此伪造 / 重放结算单拿不到任何内容。
+   *
+   * 隐私边界：只含订单号 / 交易号 / 金额 / 档位 / 用量，不含买家任何信息。
+   */
+  router.get('/api/v1/settlement/:outTradeNo', async (req, res) => {
+    try {
+      const order = await repository.findByOutTradeNo(req.params.outTradeNo);
+      if (!order) return res.status(404).json({ code: 'ORDER_NOT_FOUND', message: '没有这笔订单' });
+      if (order.orderStatus !== 'PAID') {
+        return res.status(404).json({ code: 'ORDER_NOT_SETTLEABLE', message: '订单尚未支付，无可结算用量' });
+      }
+
+      // 用量按 meter 聚合：同一订单可能有多条记录（首单交付 + 后续额度扣减都落计量）。
+      // quantity 列是 REAL，整数用量不显示浮点尾巴，两位小数封顶（金额口径同规）。
+      const usage = repository.listUsage(order.outTradeNo);
+      const byMeter = new Map();
+      for (const row of usage) {
+        const prev = byMeter.get(row.meter) ?? { meter: row.meter, quantity: 0, unit: row.unit };
+        prev.quantity += Number(row.quantity) || 0;
+        byMeter.set(row.meter, prev);
+      }
+      const meters = [...byMeter.values()].sort((a, b) => a.meter.localeCompare(b.meter));
+      const usageString = meters
+        .map((m) => {
+          const q = Math.round(m.quantity * 100) / 100;
+          return `${m.meter}:${Number.isInteger(q) ? q : q.toFixed(2)}${m.unit}`;
+        })
+        .join(',');
+
+      const fields = {
+        amount: order.amount,
+        currency: order.currency,
+        fulfilled_at: order.updatedAt ?? '',
+        out_trade_no: order.outTradeNo,
+        resource_id: order.resourceId,
+        seller_id: sellerId,
+        service_id: services[order.tier]?.serviceId ?? '',
+        tier: order.tier,
+        trade_no: order.tradeNo ?? '',
+        usage: usageString,
+      };
+      // 规范语句签名（buildSignContent：key 字典序 + 空值跳过）；
+      // 回显的 settlement 对象按同一规则过滤空值，保证与 statement 逐字段一致
+      const statement = buildSignContent(fields);
+      const settlementEcho = Object.fromEntries(
+        Object.entries(fields).filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== ''),
+      );
+      const signature = rsaSign(statement, config.privateKeyB64);
+
+      return res.json({
+        out_trade_no: order.outTradeNo,
+        settlement: settlementEcho,
+        statement,
+        signature,
+        sign_type: 'RSA2',
+        sign_algorithm: 'RSA-SHA256 (PKCS#1 v1.5)',
+        seller_public_key: exportSellerPublicKeyPem(config.privateKeyB64),
+        how_to_verify: [
+          '1. 保存响应中的 seller_public_key 为 seller.pub（PEM 文件）',
+          "2. echo '<signature>' | base64 -d > sig.bin",
+          "3. printf '%s' '<statement 原文>' | openssl dgst -sha256 -verify seller.pub -signature sig.bin",
+          '4. 输出 Verified OK 即用量未被篡改；改动 statement 任何字段，验签必然失败',
+        ],
+        note: '规范语句按 key 字典序拼接、空值跳过——与 402 账单（Payment-Needed）同一套签名纪律',
+      });
+    } catch (err) {
+      return res.status(500).json({ code: 'SETTLEMENT_FAILED', message: err.message });
+    }
   });
 
   /**
@@ -1041,6 +1187,9 @@ function sanitizeVerifyError(raw) {
       evidence: result.evidence ?? null,
       usage: result.billing ?? null,
       fulfilled_at: order.updatedAt ?? null,
+      // 用量结算单（RSA2 签名）：核验卡的公开读者（分享链上的任何人/Agent）
+      // 可凭它离线验签核对用量——「可核验」从商家自述升级为第三方可复算。
+      settlement_url: `/api/v1/settlement/${order.outTradeNo}`,
       cta: { message: '我也要问', url: '/?ref=share' },
       // 官方作品页（影响力 20% 只统计那个页面上的浏览/点赞/评论）
       // → 买家把核验卡/收据分享出去时，顺手把官方作品页带出去。
@@ -1205,6 +1354,9 @@ function sanitizeVerifyError(raw) {
           'alipay.aipay.agent.payment.verify',
           'alipay.aipay.agent.fulfillment.confirm',
         ],
+        // 商家公钥（SPKI PEM）：402 账单与用量结算单都由对应私钥 RSA2 签名，
+        // 第三方可拿它离线核验（openssl dgst -sha256 -verify）。公钥是公开信息。
+        seller_public_key: exportSellerPublicKeyPem(config.privateKeyB64),
         buyerCli: [
           'alipay-bot -- check-wallet',
           'alipay-bot -- 402-buyer-pay -f <402_needed_file>',

@@ -1090,7 +1090,7 @@ ${esc(JSON.stringify(envelope, null, 2))}</code></pre>
         ['收款方式', '支付宝 A2M 智能收（HTTP 402）· 非自建收银'],
         ['核心接口', 'payment.verify / fulfillment.confirm / payment.precreate'],
         ['定价', '单次 ¥0.50 · 十次包 ¥4.50 · 场景任务 ¥9.90 · 首发半价 ¥4.95'],
-        ['官方验收', '支付宝<b>官方买方脚本</b>端到端买通（<code>bash scripts/official-buyer-check.sh</code>）'],
+        ['官方验收', '支付宝<b>官方买方脚本</b>端到端买通（<code>bash scripts/prod/official-buyer-check.sh</code>）'],
       ],
     },
     {
@@ -1105,7 +1105,7 @@ ${esc(JSON.stringify(envelope, null, 2))}</code></pre>
         ['网页应用形态', '<a href="#demo">即本作品演示页</a>——三维场景 + 自然语言问路 + 付费解锁'],
         ['商家技能包', '<a href="#agent">SKILL.md</a>：把导览能力封装成可安装技能，Agent 装上即可问路并付费'],
         ['Agent 自主采购', '<a href="#transaction">MCP 发现 → 402 支付 → 交付 → 回执</a>，四环可现场演示'],
-        ['官方回调通道', '<code>AP_NOTIFY_URL</code> 异步通知端点（人付款路径）+ <code>query-alipay-payment</code> 查询'],
+        ['用量结算单', '<code>GET /api/v1/settlement/:订单号</code>——RSA2 签名的用量对账单，商家公钥公开，openssl 可离线核验'],
         ['发现入口', '<a href="#api">llms.txt</a> · <code>POST /mcp</code> · <code>GET /api/v1/scenes</code>'],
       ],
     },
@@ -1115,7 +1115,7 @@ ${esc(JSON.stringify(envelope, null, 2))}</code></pre>
     ['现场跑通一次真实支付', '打开 <code>#demo</code>，点「走一遍真实沙箱支付」——走的是支付宝沙箱收银接口，不是模拟动画。'],
     ['确认支付确实经过支付宝', '看 <code>#protocol</code> 的原始报文：<code>trade_no</code> 由沙箱收银接口返回，<code>Payment-Validation</code> 由服务端生成。'],
     ['复算证据哈希', '<code>geometryHash</code> = SHA-256（场景 ID + 途经节点坐标 + 路段）。任何人都能对同一份场景数据复算出同一个值。'],
-    ['复现场景数据', '一条命令重新拉取 OSM 并重建：<code>node scripts/build-scene-from-osm.mjs --bbox … --out …</code>，结果应与站点一致。'],
+    ['复现场景数据', '一条命令重新拉取 OSM 并重建：<code>node scripts/build/build-scene-from-osm.mjs --bbox … --out …</code>，结果应与站点一致。'],
     ['验证计量是真的', '<code>#demo</code> 右侧订单看板的四个维度会随每次调用增长，不是写死的数字。'],
     ['验证幂等履约', '同一笔 <code>Payment-Proof</code> 重放多次，资源不会重复生成（订单 <code>fulfill_status</code> 恒为 <code>FULFILLED</code>）。'],
     ['验证不是内存订单', '订单落 SQLite，<code>out_trade_no</code> 有唯一约束；<b>重启服务后旧订单仍可查</b>——内存实现做不到这一点。'],
@@ -1237,7 +1237,7 @@ ${JSON.stringify(
         <div class="stage-rule"><b>到账</b> 实时到账；<b>新签约收单产品未满 90 日</b>或<b>连续交易未满 30 日</b>的款项次日结算</div>
         <div class="stage-rule"><b>服务费率</b> 单笔 1.0%，个人开发者活动期（2026.4.15–12.31）<b>零费率</b>；资金<b>直接进商家签约账号的支付宝余额</b>，不经平台代收、无需分账</div>
         <div class="stage-rule"><b>退款</b> 交易发生后 12 个月内可退；按量付费退款时服务费<b>一并退回</b>商家账户</div>
-        <div class="stage-rule"><b>结果感知</b> 官方要求「支付结果以<b>异步通知或查询接口</b>为准」——本服务已提供 <code>AP_NOTIFY_URL</code> 通知端点（<code>POST /api/v1/pay/notify</code>，金额防篡改 + 幂等，且<b>通知只推进状态机、不发放资源</b>）</div>
+        <div class="stage-rule"><b>结果感知</b> 官方《A2M 接口契约》规定按量付费<b>不使用</b>统一收单异步通知——付款结果由买方携 <code>Payment-Proof</code> 重试告知（协议内权威通道），订单状态可经 <code>GET /api/v1/orders/:订单号</code> 轮询；本服务<b>不混接</b>其他收款产品族的回调通道（契约纯度已入验收 §18.8）</div>
         <div class="stage-rule"><b>防重复履约</b> 同一 <code>trade_no</code> 不得二次履约（<code>fulfillment.confirm</code> 幂等保护）</div>
       </div>`,
     });
@@ -1264,7 +1264,7 @@ ${JSON.stringify(
     const ref = await getJSON('data/api-reference.json');
     if (!ref) {
       host.innerHTML =
-        '<div class="notice notice-amber">API 参考数据未找到，请运行 <code>node scripts/capture-api-reference.js</code> 生成。</div>';
+        '<div class="notice notice-amber">API 参考数据未找到，请运行 <code>node scripts/build/capture-api-reference.js</code> 生成。</div>';
       return;
     }
 
@@ -1831,6 +1831,17 @@ ${JSON.stringify(
         </div>`
       : '';
 
+    // 用量结算单：支付完成的瞬间就把「可核验用量」亮出来——
+    // Machine Pay 赛道定义「以可核验用量完成结算」最直接的现场证据
+    const settlementLink = extra.tradeNo && extra.envelope?.out_trade_no
+      ? `<div style="margin-top:8px;font-size:12px">
+          用量结算单已出具（<span style="font-family:var(--mono)">RSA2</span> 签名）：
+          <a href="api/v1/settlement/${encodeURIComponent(extra.envelope.out_trade_no)}" target="_blank" rel="noopener"
+             style="color:#9fd0ff;font-weight:600;text-decoration:none">查看签名原文 ↗</a>
+          <span style="color:var(--text-faint)">｜第三方可 openssl 离线验签，对语句任何篡改必红</span>
+        </div>`
+      : '';
+
     // 核验卡：把这笔已支付订单变成可公开分享的核验物（热度榜的浏览/点赞从这里来）
     const verifyBtn = extra.envelope?.out_trade_no
       ? `<div style="margin-top:14px">
@@ -1851,7 +1862,7 @@ ${JSON.stringify(
 
     setResult(`
       <div class="result-lead">${esc(content.answer ?? '')}</div>
-      ${metrics}${honest}${ent}${billing}${evidence}${trade}${verifyBtn}`);
+      ${metrics}${honest}${ent}${billing}${evidence}${trade}${settlementLink}${verifyBtn}`);
 
     $('#verifyCardBtn')?.addEventListener('click', async (e) => {
       const btn = e.currentTarget;
@@ -2328,7 +2339,7 @@ ${JSON.stringify(
     if (trace) renderTrace(trace);
     else {
       $('#traceView').innerHTML =
-        '<div class="notice notice-amber">协议快照未找到，请运行 <code>node scripts/capture-protocol-trace.js</code> 生成。</div>';
+        '<div class="notice notice-amber">协议快照未找到，请运行 <code>node scripts/build/capture-protocol-trace.js</code> 生成。</div>';
     }
 
     // 2) 实时元数据

@@ -7,7 +7,7 @@
  *
  * ⚠️ 这里的示范园区是 **演示级几何数据**（坐标为示意值），
  *    目的是让 402 付费链路与导览内核可以立刻端到端跑通。
- *    正式场景请用 `scripts/build-scene-from-osm.mjs` 从 OpenStreetMap
+ *    正式场景请用 `scripts/build/build-scene-from-osm.mjs` 从 OpenStreetMap
  *    拉取真实几何（商大元境已有的 OSM 重建管线可直接复用），
  *    生成同构的 scene 对象后替换此处。
  */
@@ -61,7 +61,7 @@ export const DEMO_SCENE = {
 export const SCENES = new Map([[DEMO_SCENE.id, DEMO_SCENE]]);
 
 /**
- * 加载磁盘上的真实场景（由 scripts/build-scene-from-osm.mjs 生成）。
+ * 加载磁盘上的真实场景（由 scripts/build/build-scene-from-osm.mjs 生成）。
  * 这样「演示场景」与「真实 OSM 场景」走完全相同的内核与付费链路，
  * 只是数据来源不同。
  */
@@ -70,7 +70,7 @@ function loadScenesFromDisk() {
   //    而 /app/data 是数据库卷——两者分离后，卷挂载**不可能**再遮蔽场景数据
   //    （历史上在 aliyun 因为 ./data 挂载遮住 app/data/scenes，线上少了一个场景）。
   // 🔴 默认路径按**本文件位置**解析，不按进程 cwd：验收脚本会在仓库根目录跑
-  //    `node scene-guide/scripts/smoke.js`，按 cwd 解析会一个真实场景都加载不到，
+  //    `node scene-guide/scripts/test/smoke.js`，按 cwd 解析会一个真实场景都加载不到，
   //    所有内核检查随之静默失败（2026-11-21 实测复现：套件里 smoke 挂、单独跑过）。
   const defaultDir = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),

@@ -11,12 +11,13 @@
 
 | 项 | 状态 |
 |---|---|
-| 离线协议自检 | ✅ **42/42 通过**（`npm run smoke`） |
+| 自动化测试 | ✅ **540/540 通过**（`npm test`：smoke 70 + test-deep 276 + test-deep2 145 + test-http 49） |
+| 端到端验收 | ✅ **92 项**（`bash scripts/verify.sh`，含 MCP Agent 链路、买家账户中心与用量结算单） |
 | 官方沙箱端到端联调 | ✅ **通过** —— 官方脚本输出「AI 按量付费沙箱服务端联调通过」 |
 | 浏览器端一键支付 | ✅ 页面里点一下即可走完 402 → 沙箱收银 → 履约 → 交付 |
 | 真实订单 | ✅ 已产生多笔 `PAID / FULFILLED` 订单（trade_no `...21371` / `...21374`） |
-| 真实场景数据 | ✅ 下沙校区 OSM：**176 个命名地标 / 862 路网节点 / 872 条边** |
-| 生产环境 | ⬜ 待 `service_id` 审核通过 + 正式密钥 |
+| 真实场景数据 | ✅ 下沙校区 OSM：**134 个命名地标（117 个去重）/ 593 路网节点 / 597 条边** |
+| 生产环境 | ⬜ 待 `service_id` 审核通过 + 正式密钥（覆盖层已就位：`config/services.production.json`） |
 
 沙箱完整链路已验证：**402 Payment-Needed → 支付宝沙箱收银（HTTP 200）→ Payment-Proof 重试 → `payment.verify` 验签 → `fulfillment.confirm` 履约回执 → HTTP 200 交付资源**。
 
@@ -30,7 +31,7 @@
 | `public/data/protocol-trace.json` | **真实抓取**的 402 协议往返报文（站点降级时回落到它） |
 | `public/three-scene.js` | **三维场景模块**（Three.js）：OSM 建筑轮廓拉伸体块、路网线带、地标光柱、发光路线管、轨道相机 |
 | `public/manifest.webmanifest` `public/sw.js` | **PWA**：作品可作为「桌面应用」安装（对应 Vibe Pay 的桌面应用交付形态） |
-| `public/icon-192.png` `public/icon-512.png` | PWA 图标（`scripts/make-icons.mjs` 纯 PNG 编码生成，无第三方依赖） |
+| `public/icon-192.png` `public/icon-512.png` | PWA 图标（`scripts/build/make-icons.mjs` 纯 PNG 编码生成，无第三方依赖） |
 | `public/vendor/` | 本地化的 three.js + OrbitControls（不依赖 CDN，站点可离线跑） |
 | `deploy/` | **部署套件**：systemd 单元 + nginx 配置 + 一键发布脚本（含 ICP 备案提示与密钥安全约定） |
 | `src/mcp/server.js` | **MCP 服务端**：把付费资源暴露为 MCP 工具，Agent 通过 `tools/list` 即可「发现服务」 |
@@ -67,7 +68,7 @@ open http://localhost:3000/
   看板中自测订单**永远不计入「真实付费用户」**
 - **转化漏斗**：访客 → 免费试看 → 发起支付 → 付费，按渠道拆分，`GET /api/v1/growth`
 - **免费试看**：每人每天 3 次（服务端计数限流），只给答案文本；路线图/距离/证据哈希是付费价值
-- **渠道分享包**：`node scripts/make-invites.mjs` 为 7 类社群生成带归因的链接与文案
+- **渠道分享包**：`node scripts/build/make-invites.mjs` 为 7 类社群生成带归因的链接与文案
 
 ### 研学任务（¥9.90 档位）—— 完整的打卡闭环
 
@@ -89,7 +90,7 @@ open http://localhost:3000/
 
 下沙校区的 OSM 步道被切成 38 个连通分量。我们没有生成一张假的示意路网去糊弄演示，而是：
 
-- **路通 → 给实测路径**：117 个去重命名地标中，有 **381 对**之间存在真实步道路由
+- **路通 → 给实测路径**：117 个去重命名地标中，有 **375 对**之间存在真实步道路由（全对最短路复算）
 - **路不通 → 明确标注的直距估算**：响应里用 `route.type`（`walkway` / `direct-estimate`）
   与 `measured`（`true` / `false`）说清楚，绝不编一条路
 
@@ -105,7 +106,7 @@ open http://localhost:3000/
 
 ### 三维场景
 
-- 建筑体块由 OSM **真实多边形轮廓**拉伸（`scripts/build-scene-from-osm.mjs` 采集 `footprints`）
+- 建筑体块由 OSM **真实多边形轮廓**拉伸（`scripts/build/build-scene-from-osm.mjs` 采集 `footprints`）
 - 高度按 `building:levels` / `height` 标签取值，缺失时按占地面积估算，**统一夸张 ×3.0 并在界面标注**
 - 路线用 CatmullRom 曲线 + TubeGeometry 绘制，沿线有流动光点
 - 相机取景**始终收敛到街区尺度**（90–320m）——按 1.2km 路线全长取景会让体块糊成线框
@@ -151,7 +152,7 @@ bash scripts/verify.sh                       # 默认 http://127.0.0.1:3000
 BASE_URL=https://your-domain bash scripts/verify.sh
 ```
 
-覆盖 39 项：服务可达性、402 支付挑战与 `Payment-Needed` 解码、真实支付与交付、
+覆盖 92 项：服务可达性、402 支付挑战与 `Payment-Needed` 解码、真实支付与交付、
 幂等履约、计量维度、场景数据真实性与 OSM 归属、协议快照、**MCP 发现能力**、
 **研学任务链路（含打卡顺序核验与「完成才发证」）**、站点资源完整性。
 
@@ -170,7 +171,7 @@ BASE_URL=https://your-domain bash scripts/verify.sh
 改动支付链路后重新抓一次真实报文：
 
 ```bash
-node scripts/capture-protocol-trace.js
+node scripts/build/capture-protocol-trace.js
 ```
 
 ---
@@ -263,18 +264,38 @@ Agent（买方）                          商家服务（本项目）          
 ```
 scene-guide/
 ├── SKILL.md                  # 商家技能：给买方 Agent 的调用说明
-├── config/services.json      # 服务档位（单价 / 额度 / serviceId）
-├── scripts/smoke.js          # 离线协议自检（42 项）
+├── config/
+│   ├── services.json         # 服务档位（单价 / 额度 / serviceId 沙箱占位）
+│   ├── services.production.json  # 生产 service_id 覆盖层（已 gitignore，仅 production 环境合并）
+│   ├── invites.json          # 种子渠道码（bootstrap 时灌入归因库）
+│   └── production.template.json  # 生产配置模板（复制为 production.json 后填真值）
+├── scripts/                  # 43 个脚本，完整索引见 scripts/README.md
+│   ├── verify.sh             # 端到端验收总入口（92 项，需本地服务）——人类入口，稳定路径
+│   ├── db-check.mjs          # 两库体检（可进 CI/监控）
+│   ├── test/                 # 4 套自动化测试，npm test 一次跑完（562 项）
+│   ├── verify/               # 10 个验收子脚本（被 verify.sh 调用）
+│   ├── prod/                 # 14 个生产切换与支付核验
+│   └── build/                # 12 个场景构建 / 报文抓取 / 素材生成
+├── data/
+│   ├── scenes/               # 构建好的场景数据（入库，否则克隆后跑不起来）
+│   └── archive/              # 已退役但需留档的数据（如 2026-11-21 损坏库备份）
+├── public/                   # 作品官网 + 买家账户中心 + 本地化 three.js
 └── src/
-    ├── server.js             # 应用装配
-    ├── config.js             # 运行时配置加载（密钥不在源码里）
+    ├── server.js             # 应用装配（含归因中间件 / 安全响应头 / 404 改写）
+    ├── config.js             # 运行时配置加载 —— ROOT 的唯一锚点，密钥不在源码里
+    ├── community.js          # 官方作品页链接配置（影响力 → 商业化的分享回路）
     ├── a2m/
     │   ├── protocol.js       # 402 协议：签名、Base64URL、Payment-Needed/Proof/Validation
-    │   └── client.js         # verify / fulfillment.confirm 封装
-    ├── orders/repository.js  # SQLite 订单仓储（唯一约束 + 事务 + 幂等履约）
+    │   └── client.js         # verify / fulfillment.confirm 封装（含抖动重试）
+    ├── orders/repository.js  # SQLite 订单仓储（唯一约束 + 事务 + 幂等履约 + 权益/礼品/退款）
     ├── metering/index.js     # 自建用量计量与计费层
-    ├── scene/                # 场景数据与导览内核（实体消解 / 最短路 / 证据哈希）
-    └── routes/guide.js       # 付费资源路由（402 控制流）
+    ├── scene/                # 场景数据与导览内核（实体消解 / 最短路 / 证据哈希 / 研学任务）
+    ├── mcp/server.js         # MCP 服务端（Agent 发现入口）
+    ├── analytics/store.js    # 渠道归因 / 转化漏斗 / 社区反馈墙
+    └── routes/
+        ├── guide.js          # 付费资源路由（402 控制流 + 用量结算单）
+        ├── account.js        # 买家账户中心（订单 / 额度 / 礼品码 / 退款）
+        └── feedback.js       # 社区反馈墙
 ```
 
 ---
@@ -303,6 +324,10 @@ scene-guide/
 | `tokens` | token | 模型 token 消耗 |
 | `distance_m` | m | 规划路径总长度 |
 | `poi_count` | poi | 返回点位数量 |
+
+计量不止是内部看板：每笔已支付订单可出具 **用量结算单**（`GET /api/v1/settlement/:outTradeNo`）——
+key 字典序规范语句 + 商家 RSA2 签名 + 公钥 + openssl 核验步骤，第三方可**离线**复算，
+对任何字段的篡改验签必红。赛道定义「以可核验用量完成结算」由此落地为可亲手验证的证据。
 
 平台不提供自动 token 计量接口，**计量由商家服务端自行完成** —— 这一层是本项目里最能写进简历的工程增量。
 看板：`GET /api/v1/stats`
@@ -338,6 +363,6 @@ scene-guide/
 
 ## 相关文档
 
-- [参赛方案.md](../参赛方案.md) — 赛道取舍、里程碑、简历产出
-- [技术规格-A2M-402.md](../技术规格-A2M-402.md) — 协议逐字段规格与踩坑记录
-- [执行清单.md](../执行清单.md) — P0→P4 可勾选清单
+- [参赛方案.md](../docs/参赛方案.md) — 赛道取舍、里程碑、简历产出
+- [技术规格-A2M-402.md](../docs/技术规格-A2M-402.md) — 协议逐字段规格与踩坑记录
+- [执行清单.md](../docs/执行清单.md) — P0→P4 可勾选清单

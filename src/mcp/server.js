@@ -13,7 +13,7 @@
  *     {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"scene_guide","arguments":{...}}}
  */
 
-const TOOL_NAME = 'scene_guide';
+export const TOOL_NAME = 'scene_guide';
 
 const TOOL_DEF = {
   name: TOOL_NAME,
@@ -82,6 +82,27 @@ const SCENES_TOOL = {
   annotations: { readOnlyHint: true, idempotentHint: true, paid: false },
 };
 
+const SETTLEMENT_TOOL = {
+  name: 'scene_guide_settlement',
+  title: '用量结算单',
+  description:
+    '查询一笔已支付订单的用量结算单（Machine Pay「以可核验用量完成结算」）。' +
+    '返回商家 RSA2 签名的规范用量语句 + 商家公钥 + openssl 离线核验步骤：' +
+    '买方 Agent 可凭此**不信任商家、只验签**地核对本单实际用量，' +
+    '对 statement 原文任何字段的篡改验签必红。免费、只读。',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      out_trade_no: {
+        type: 'string',
+        description: '商户订单号（购买交付时 structuredContent.out_trade_no 原样返回的那个）。',
+      },
+    },
+    required: ['out_trade_no'],
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, paid: false },
+};
+
 const PROTOCOL_VERSION = '2025-06-18';
 
 export function createMcpHandler({ listScenes, answerGuide, createQuest, measure, billingSummary, services }) {
@@ -94,12 +115,14 @@ export function createMcpHandler({ listScenes, answerGuide, createQuest, measure
         '本服务按次计费（支付宝 A2M 智能收 / HTTP 402）。首次调用 scene_guide 会返回 ' +
         'payment_required 与一份 Payment-Needed 账单头（payment_needed_header，Base64URL 原文）；' +
         '请把该账单头**原样**交给支付宝的 alipay-pay-for-402-service 技能引导用户完成付款，' +
-        '再把得到的 Payment-Proof 作为 payment_proof 参数重新调用本工具。',
+        '再把得到的 Payment-Proof 作为 payment_proof 参数重新调用本工具。' +
+        '交付完成后可调用免费的 scene_guide_settlement（参数 out_trade_no）取回本单的 ' +
+        'RSA2 签名用量结算单，离线验签核对本单实际用量。',
     };
   }
 
   async function toolsList() {
-    return { tools: [SCENES_TOOL, TOOL_DEF] };
+    return { tools: [SCENES_TOOL, TOOL_DEF, SETTLEMENT_TOOL] };
   }
 
   async function toolsCall(params, ctx = {}) {
@@ -109,6 +132,62 @@ export function createMcpHandler({ listScenes, answerGuide, createQuest, measure
     if (name === SCENES_TOOL.name) {
       return {
         content: [{ type: 'text', text: JSON.stringify({ scenes: listScenes() }, null, 2) }],
+      };
+    }
+
+    // 用量结算单核对：免费只读，买方 Agent 用来「不信任商家、只验签」地核对本单用量。
+    // 与付费资源工具不同，这里不需要支付凭证——结算单本来就是给第三方看的。
+    if (name === SETTLEMENT_TOOL.name) {
+      const outTradeNo = String(args.out_trade_no ?? '').trim();
+      if (!outTradeNo) {
+        return { isError: true, content: [{ type: 'text', text: '参数 out_trade_no 不能为空' }] };
+      }
+      const selfBase =
+        process.env.SELF_BASE_URL ?? `http://127.0.0.1:${process.env.PORT ?? 3000}`;
+      let settleRes;
+      try {
+        settleRes = await fetch(
+          `${selfBase}/api/v1/settlement/${encodeURIComponent(outTradeNo)}`,
+          { signal: AbortSignal.timeout(15000) },
+        );
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `无法连接结算单端点：${err.message}` }],
+        };
+      }
+      const body = await settleRes.json().catch(() => ({}));
+      if (!settleRes.ok) {
+        return {
+          isError: true,
+          content: [{
+            type: 'text',
+            text: `结算单不可用（HTTP ${settleRes.status}）：${body.message ?? body.code ?? ''}`
+              + '——只有已支付订单出具结算单；若你刚完成支付，等交付完成后再查。',
+          }],
+        };
+      }
+      return {
+        content: [
+          {
+            type: 'text',
+            text:
+              `订单 ${outTradeNo} 的用量结算单（${body.sign_type} 签名）。\n`
+              + '核验方法：保存 seller_public_key 为 PEM，signature 用 base64 -d 还原为二进制，'
+              + "然后 printf '%s' '<statement>' | openssl dgst -sha256 -verify seller.pub -signature sig.bin\n"
+              + '对 statement 原文任何字段的篡改，验签必然失败——用量数字因此可信。',
+          },
+          { type: 'text', text: JSON.stringify(body, null, 2) },
+        ],
+        structuredContent: {
+          out_trade_no: body.out_trade_no,
+          settlement: body.settlement,
+          statement: body.statement,
+          signature: body.signature,
+          sign_type: body.sign_type,
+          seller_public_key: body.seller_public_key,
+          how_to_verify: body.how_to_verify,
+        },
       };
     }
 

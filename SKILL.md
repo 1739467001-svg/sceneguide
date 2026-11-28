@@ -115,6 +115,20 @@ POST /mcp   （JSON-RPC 2.0 over HTTP）
 
 把 `content.answer` 呈现给用户；路线可视化需要时使用 `content.route.points`（含 `xy` 局部米制坐标与 `lonlat` 经纬度）。
 
+### 用量结算单（免费核对，无需支付凭证）
+
+交付完成后，可用商户订单号取回本单的**用量结算单**（Machine Pay「以可核验用量完成结算」）：
+
+```
+GET /api/v1/settlement/<out_trade_no>
+```
+
+响应包含：规范用量语句 `statement`（key 字典序 `k=v&`，与 402 账单同一套签名纪律）、
+商家 RSA2 签名 `signature`、商家公钥 `seller_public_key`（SPKI PEM）与 `how_to_verify`
+openssl 核验步骤。买方可「不信任商家、只验签」：对 `statement` 任何字段的篡改，验签必红。
+只有已支付订单出具结算单（未支付返回 404）；MCP 买方亦可直接调用免费工具
+`scene_guide_settlement`（参数 `out_trade_no`）取回同样内容。
+
 ### 后续
 
 完全转移到 `alipay-pay-for-402-service` 技能的工作流。

@@ -13,7 +13,7 @@
     "sellerId": "FILL_ME_2088格式商户PID（= 报名支付宝账号的 PID，勿用他人账号）",
   "gateway": "https://openapi.alipay.com/gateway.do",
   "precreate": {
-    "_comment": "官方预下单形态开关。开启后 402 响应同时带 amtPaymentLink（官方 alipay.aipay.agent.payment.precreate 返回的 amt_pre_pay_id）——官方文档 MACHINE_PAY.md 的生产流程。先跑 node scripts/precreate-check.mjs 实测确认字段名，再置 enabled: true。默认关闭。",
+    "_comment": "官方预下单形态开关。开启后 402 响应同时带 amtPaymentLink（官方 alipay.aipay.agent.payment.precreate 返回的 amt_pre_pay_id）——官方文档 MACHINE_PAY.md 的生产流程。先跑 node scripts/prod/precreate-check.mjs 实测确认字段名，再置 enabled: true。默认关闭。",
     "enabled": false
   }
 }

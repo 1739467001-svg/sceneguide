@@ -46,27 +46,36 @@ sudo bash deploy/https/enable-https.sh <你的域名>
 
 | 文件 | 用途 |
 |---|---|
-| `deploy.sh` | 一键发布（Compose 路径为现网主力；systemd 路径为历史备用） |
+| `deploy.sh` | 一键发布（Compose 路径为现网主力） |
 | `kit-sg60/` | 现网 Compose 套件：compose.yml + nginx location 片段 + 运维手册 |
 | `https/` | HTTPS 就绪包：nginx 443 server 块模板 + certbot 一键脚本 |
-| `sceneguide.service` | 【历史】裸机 systemd 单元（已退役路径） |
-| `nginx.conf` | 【历史】裸机 nginx 站点模板（已退役路径，端口描述与 service 文件有出入，勿直接使用） |
+| `watchdog.sh` + `sceneguide-watchdog.{service,timer}` | 自愈看门蛇（现役）：每 5 分钟探活 `/healthz`，失败则 `compose restart`，120s 防风暴 |
 | `服务器部署清单.md` | 真实线上状态、踩坑记录与升级七步 |
+| `retired/` | 已退役的裸机 systemd 路径配置（2026-11-21 起不用，仅作历史记录，见 `retired/README.md`） |
 
 ## 步骤
 
 ### 1. 服务器侧（一次性）
 
-```bash
-# 上传部署配置
-scp -r deploy/ user@<服务器IP>:/tmp/sceneguide-deploy
+现网走 Compose，服务器侧只需就位两件事——**共享 nginx 的 location 片段**与**看门狗**：
 
-# 在服务器上安装 systemd 单元与 nginx 配置
-sudo cp /tmp/sceneguide-deploy/sceneguide.service /etc/systemd/system/
-sudo cp /tmp/sceneguide-deploy/nginx.conf /etc/nginx/sites-available/sceneguide
-sudo ln -sf /etc/nginx/sites-available/sceneguide /etc/nginx/sites-enabled/
-sudo mkdir -p /opt/sceneguide && sudo chown $USER /opt/sceneguide
+```bash
+# ① nginx location 片段（插进现有路由之间，不动任何现有 location）
+scp kit-sg60/nginx-sceneguide.conf user@<服务器IP>:/tmp/
+ssh user@<服务器IP> "sudo mkdir -p /etc/nginx/app-routes && \
+  sudo cp /tmp/nginx-sceneguide.conf /etc/nginx/app-routes/sceneguide.conf && \
+  sudo nginx -t && sudo systemctl reload nginx"
+
+# ② 自愈看门狗（比赛细则要求「维持作品可用」）
+scp watchdog.sh user@<服务器IP>:/tmp/
+ssh user@<服务器IP> "sudo cp /tmp/watchdog.sh /usr/local/bin/sg-watchdog.sh && \
+  sudo chmod +x /usr/local/bin/sg-watchdog.sh"
+scp sceneguide-watchdog.service sceneguide-watchdog.timer user@<服务器IP>:/tmp/
+ssh user@<服务器IP> "sudo cp /tmp/sceneguide-watchdog.{service,timer} /etc/systemd/system/ && \
+  sudo systemctl daemon-reload && sudo systemctl enable --now sceneguide-watchdog.timer"
 ```
+
+> 裸机 systemd + 根路径部署是**已退役**的旧路径，配置在 `retired/`，仅作历史记录。
 
 ### 2. 发布（每次更新后）
 
@@ -106,5 +115,5 @@ sudo bash deploy/https/enable-https.sh <你的域名>
 ## 验证
 
 ```bash
-BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh   # 88 项验收（含 MCP Agent 链路与买家账户中心）
+BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh   # 77 项验收（含 MCP Agent 链路与买家账户中心）
 ```

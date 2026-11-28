@@ -6,11 +6,11 @@ import express from 'express';
 import compression from 'compression';
 import { resolveConfig, resolveSellerId, loadServices, ROOT } from './config.js';
 import { createAlipayClient } from './a2m/client.js';
+import { createReceiptSweeper } from './a2m/sweeper.js';
 import { createOrderRepository } from './orders/repository.js';
 import { createGuideRouter } from './routes/guide.js';
 import { createFeedbackRouter } from './routes/feedback.js';
 import { createAccountRouter } from './routes/account.js';
-import { createNotifyRouter } from './routes/notify.js';
 import { createDemoPayer } from './demo/pay.js';
 import { createAnalyticsStore } from './analytics/store.js';
 
@@ -124,11 +124,6 @@ export function createApp({ config, services, sellerId, repository, alipayClient
   /* 买家账户中心：我的订单 / 权益额度 / 礼品码 / 售后 */
   app.use(createAccountRouter({ repository, analytics }));
 
-  /* 官方支付异步通知（AP_NOTIFY_URL / notify_url）——
-     官方《支付 MCP Server》与网页/手机收银都靠它把「用户已付款」告知商家，
-     官方要求「支付结果以异步通知或查询接口为准，不能依赖同步跳转」。 */
-  app.use(createNotifyRouter({ repository, config }));
-
   /* ── 社区反馈墙：点赞 / 评论 / 举报 ── */
   app.use(createFeedbackRouter({ analytics }));
 
@@ -234,12 +229,20 @@ function bootstrap() {
   // 「换个目录启动就连到一个崭新的空库、还不报错」的脚坑。
   const repository = createOrderRepository({ file: process.env.ORDER_DB ?? path.resolve(ROOT, 'data', 'orders.db') });
   const alipayClient = createAlipayClient(config);
+  // 履约回执自愈：PENDING_CONFIRM 卡单定期重发回执（回执入参只有 trade_no，
+  // 商家可独立完成，不必等买方重试）。旋钮 RECEIPT_SWEEPER_INTERVAL_MS，0 = 关闭。
+  const receiptSweeper = createReceiptSweeper({
+    repository,
+    alipayClient,
+    intervalMs: Number(process.env.RECEIPT_SWEEPER_INTERVAL_MS ?? 60000),
+  });
+  receiptSweeper.start();
   const demoPayer = createDemoPayer({ config });
   const analytics = createAnalyticsStore({
     file: process.env.ANALYTICS_DB ?? path.resolve(ROOT, 'data', 'analytics.db'),
   });
 
-  // 种子渠道：config/invites.json 由 scripts/make-invites.mjs 生成
+  // 种子渠道：config/invites.json 由 scripts/build/make-invites.mjs 生成
   // 🔴 按 ROOT 解析，不按进程 cwd（2026-11-23 修正）：
   //    旧实现写 path.resolve('config/invites.json')——cwd 相对。容器里 WORKDIR
   //    恰好是 /app 所以看不出问题，但一旦从别的目录启动（systemd 的
@@ -278,6 +281,7 @@ function bootstrap() {
 
   const shutdown = (signal) => {
     console.log(`\n收到 ${signal}，正在关闭…`);
+    receiptSweeper.stop();
     server.close(() => {
       // 两个库都要关：只关订单库会让 analytics 的连接与 WAL 检查点留到进程退出，
       // 容器重启时留下 -wal/-shm 残留（2026-11-23 补上，与 repository.close() 成对）。

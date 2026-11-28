@@ -71,7 +71,7 @@ curl -s -o /dev/null -w "%{http_code}\n" https://121.43.80.231/sceneguide/
 openssl s_client -connect 121.43.80.231:443 </dev/null | grep -A1 "subject alternative"
 
 # 模拟评委：Chrome 默认参数访问 http:// 应自动升级并成功加载
-node scripts/probe-render.mjs    # BASE_URL 默认打 https://121.43.80.231/sceneguide
+node scripts/build/probe-render.mjs    # BASE_URL 默认打 https://121.43.80.231/sceneguide
 ```
 
 ## 副作用（好事）

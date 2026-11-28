@@ -403,9 +403,9 @@
   ✓ GET /introduction.html → 200
   ✓ 结果区 aria-live（读屏可达）
 ▸ 16. MCP Agent 链路（端到端）
-  ✓ MCP Agent 链路全部通过（21 项，见 scripts/verify-mcp-flow.mjs）
+  ✓ MCP Agent 链路全部通过（21 项，见 scripts/verify/verify-mcp-flow.mjs）
 ▸ 17. 买家账户中心（端到端）
-  ✓ 买家账户中心全部通过（17 项，见 scripts/verify-account-flow.mjs）
+  ✓ 买家账户中心全部通过（17 项，见 scripts/verify/verify-account-flow.mjs）
 ▸ 18. 机构采购留资（B 端入口）
   ✓ 合法留资被接受
   ✓ 缺联系方式被拒（400）
@@ -413,7 +413,7 @@
 ▸ 19. 数据库体检
   ✓ orders.db 与 analytics.db 体检通过（node scripts/db-check.mjs）
 ▸ 20. 三维渲染完整性（浏览器层）
-  ✓ 三维渲染完整性通过（建筑对齐 footprint / demo-park 不黑屏，见 scripts/verify-render.mjs）
+  ✓ 三维渲染完整性通过（建筑对齐 footprint / demo-park 不黑屏，见 scripts/verify/verify-render.mjs）
 ────────────────────────────────────────────────────────
 全部通过：88 项
 </code></pre>
@@ -531,17 +531,18 @@
                   <code>query-alipay-payment</code> /<br>
                   <code>refund-alipay-payment</code> /<code>query-alipay-refund</code></td>
               <td><b>人</b>自己扫码或登录付款</td>
-              <td><b>互补路径</b>：人付款时由官方能力发起与查询；本服务提供
-                  <code>AP_NOTIFY_URL</code> 异步通知端点接收结果（官方要求「支付结果以异步通知或查询接口为准」），
-                  并已实现防篡改与幂等</td>
+              <td><b>不混接</b>：官方《A2M 接口契约》规定按量付费<b>不得混入</b>统一收单接口、
+                  异步通知及其回调地址——本作品是纯 Machine Pay 实现（契约纯度已入验收 §18.8）；
+                  「人付款」同样走 402：由买方 Agent / 官方买方技能引导确认并回传凭证</td>
             </tr>
           </tbody>
         </table>
         <div class="notice notice-blue" style="margin-top:12px">
           <b>分工的理由：</b>402 协议解决的是「<b>Agent 买 API</b>」——买方是程序，凭证随请求回传，
-          天然可靠；而「<b>人买内容</b>」没有 Payment-Proof 回传路径，
-          必须靠官方的异步通知或查询接口才知道钱到账了。两条路各用其长，
-          而不是自己造一套支付。
+          天然可靠；「<b>人买内容</b>」在本作品里同样收口到 402：人确认付款的动作由买方
+          Agent / 官方买方技能引导完成，凭证回传路径与 Agent 买方完全一致。
+          官方《A2M 接口契约》明确按量付费不使用统一收单异步通知——所以我们<b>不做混接</b>，
+          也不自己造一套支付。
         </div>
       </div>
 
@@ -572,7 +573,7 @@
         它会自己拿到 402 账单、引导你在支付宝确认付款、携 <code>Payment-Proof</code> 重试，
         并把交付结果与 <code>Payment-Validation</code> 回执一并打印出来。
         <br />想连我们的验收套件一起跑（需要官方 Skill 与沙箱配置）：
-        <code>bash scripts/official-buyer-check.sh</code>
+        <code>bash scripts/prod/official-buyer-check.sh</code>
       </div>
   </div>
 </section>
@@ -1025,7 +1026,7 @@ fulfill_status: UNFULFILLED ──► PENDING_CONFIRM ──► FULFILLED
       <div class="codeblock">
         <div class="codeblock-head"><span>构建脚本（可复现）</span>
           <button class="copy-btn" data-copy="#buildCode">复制</button></div>
-        <pre id="buildCode"><code>node scripts/build-scene-from-osm.mjs \
+        <pre id="buildCode"><code>node scripts/build/build-scene-from-osm.mjs \
   --bbox 30.3070,120.3720,30.3190,120.3920 \
   --scene-id zjgsu-xiasha \
   --scene-name "浙江工商大学下沙校区" \
@@ -1159,6 +1160,6 @@ fulfill_status: UNFULFILLED ──► PENDING_CONFIRM ──► FULFILLED
 <button class="back-top" id="backTop" aria-label="回到顶部" hidden>↑</button>
 
 <!-- 静态资源带版本号：这个站的 JS 就是作品本体，任何缓存命中都会让评委看到旧版本 -->
-<script src="app.js?v=20261127-ui20"></script>
+<script src="app.js?v=20261128-pay1"></script>
 </body>
 </html>

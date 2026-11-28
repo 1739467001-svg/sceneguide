@@ -120,11 +120,14 @@
               <tr><td class="k">履约时间</td><td class="v num">${esc(String(j.fulfilled_at ?? '').slice(0, 19).replace('T', ' '))} UTC</td></tr>
               <tr><td class="k">证据哈希</td><td class="v hash">${esc(j.evidence?.geometryHash ?? '—')}</td></tr>
               <tr><td class="k">用量</td><td class="v num">${esc(Object.entries(j.usage ?? {}).map(([k, v]) => `${k} ${v}`).join(' · ') || '—')}</td></tr>
+              ${j.settlement_url ? `<tr><td class="k">用量结算单</td><td class="v"><a href="${esc(j.settlement_url)}" target="_blank" rel="noopener" style="color:#9fd0ff;font-weight:600;text-decoration:none;">已出具（RSA2 签名）· 查看原文 ↗</a></td></tr>` : ''}
             </table>
             <div class="explain">
               这张卡由商家服务端出具：<b>证据哈希</b>覆盖真实路网拓扑的节点与边，
               任何人可复算；交易号已脱敏，卡上不含任何个人信息。
               完整路线内容仍属付费交付——核验的是「这笔交易真实发生」，不是内容本身。
+              本单的<b>用量结算单</b>随交易一同出具（规范语句 + 商家 RSA2 签名 + 公钥）：
+              第三方可用 openssl 离线验签，对 statement 任何字段的篡改验签必红。
             </div>
             <a class="cta" href="./?ref=share">${esc(j.cta?.message ?? '我也要问')}</a>
             ${officialBlock(j.official)}

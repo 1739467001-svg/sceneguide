@@ -45,11 +45,11 @@ import Database from 'better-sqlite3';
  * 「其中真实」充值——评委看到的真实付费数被作者自己的脚本抬高。
  */
 // 🔴 2026-11-27 补两条排除（此前漏了，导致「真实付费」被自己的验收脚本抬高）：
-//   ① `judge-%` —— scripts/judge-flow.mjs 是**冷访客**路径（全新 profile、无任何状态），
+//   ① `judge-%` —— scripts/prod/judge-flow.mjs 是**冷访客**路径（全新 profile、无任何状态），
 //      它按设计不带访客身份，于是每一跑都生成一个新 visitor_id，前缀排除全部落空。
 //      修法：让它带 `sg_vid=judge-cold-<ts>` cookie —— 依然是冷访客（没有订单/额度/权益），
 //      只是**身份可识别**。「冷」指的是状态，不是匿名。
-//   ② `ref_code = 'selfcheck'` —— scripts/official-buyer-check.sh 调用**支付宝官方**买方脚本
+//   ② `ref_code = 'selfcheck'` —— scripts/prod/official-buyer-check.sh 调用**支付宝官方**买方脚本
 //       local_402_sandbox_pay.py，那个脚本不接受自定义 header/cookie，没法带身份。
 //      改由 URL 带 `ref=selfcheck` 让订单落到一个专用渠道码上，再按渠道码排除。
 //      ⚠️ 这个标记**只能用于排除、不能用于虚增**：它让一笔订单不计入真实付费，
@@ -69,7 +69,7 @@ const SELF_TEST_SQL = `(source = 'demo'
 // 关于第 ③ 条：官方口径的「真实付费」是「通过支付宝 AI 付达成的有效交易」，
 // 而**沙箱收银产生的是 mock 交易**——官方文档原话「沙箱环境不使用真实资金」。
 // 判别依据是交易号位数：实测沙箱 trade_no 是 **32 位**，生产真实交易号是 **28 位**
-// （见 scripts/first-trade-no.mjs 的同一条判别）。
+// （见 scripts/prod/first-trade-no.mjs 的同一条判别）。
 // 这条同时解决了历史污染：2026-11-27 之前，judge-flow 与 official-buyer-check
 // 打的都是公开 402 端点且不带身份，产生的订单全部落进了 paidReal
 // （线上实测 33 笔，逐笔查下来 100% 是自己的验收脚本造的）。
@@ -531,52 +531,16 @@ export function createOrderRepository({ file = process.env.SG_ORDERS_DB || 'data
       db.prepare("UPDATE orders SET source = 'demo' WHERE out_trade_no = ?").run(outTradeNo);
     },
 
-    /**
-     * 官方异步支付通知：把订单标记为已支付（订单状态机 PENDING_PAYMENT → PAID）。
-     *
-     * 为什么要它：官方「支付 MCP Server」与网页/手机支付等官方收银路径，
-     * 都以 **异步通知**（AP_NOTIFY_URL / notify_url）把「用户已付款」告知商家，
-     * 官方文档明确「支付结果必须以异步通知或查询接口返回为准，不能依赖同步跳转」。
-     * 本项目原先只能靠买方携 Payment-Proof 重试来感知付款（402 协议的路径），
-     * 缺一条**不依赖买方 Agent 的官方通知**通道——人自己用支付宝付了钱时尤其需要。
-     *
-     * 安全约定（与本项目一贯的「不轻信外部标识」一致）：
-     *   · 金额必须与本地订单金额**完全一致**才认（防篡改）
-     *   · 幂等：重复通知只生效一次（订单已 PAID 直接返回 ok）
-     *   · 通知**只推进状态机，不发放资源**——资源交付仍由 Payment-Proof 验付路径负责，
-     *     或由带凭证的订单查询结果触发，避免「通知即交付」被伪造通知绕过
-     */
-    async markPaidByNotification(outTradeNo, { tradeNo, amount } = {}) {
-      if (!outTradeNo) return { ok: false, reason: 'NO_OUT_TRADE_NO' };
-      // ⚠️ findByOutTradeNo 是 **async**，必须 await——否则拿到的是 Promise，
-      //    order.orderStatus 恒为 undefined，通知会静默不推进（2026-11-23 实测踩到）。
-      const order = await this.findByOutTradeNo(outTradeNo);
-      if (!order) return { ok: false, reason: 'ORDER_NOT_FOUND' };
-      if (order.orderStatus === 'PAID') {
-        return { ok: true, reason: 'ALREADY_PAID', tradeNo: order.tradeNo ?? tradeNo ?? null };
-      }
-      // 金额必须与本地订单一致（容差 0.01 元）
-      if (amount !== undefined && amount !== null && amount !== '') {
-        const local = Number(order.amount);
-        const notified = Number(amount);
-        if (!Number.isFinite(local) || !Number.isFinite(notified) || Math.abs(local - notified) > 0.001) {
-          return { ok: false, reason: 'AMOUNT_MISMATCH', local, notified };
-        }
-      }
-      const info = db
-        .prepare(
-          `UPDATE orders
-              SET order_status = 'PAID', trade_no = COALESCE(NULLIF(trade_no, ''), ?), updated_at = ?
-            WHERE out_trade_no = ?`,
-        )
-        .run(tradeNo ?? null, now(), outTradeNo);
-      return {
-        ok: true,
-        reason: 'MARKED_PAID',
-        changed: info.changes > 0,
-        tradeNo: tradeNo ?? order.tradeNo ?? null,
-      };
-    },
+    /* 🔴 决策留痕（2026-11-28）：这里曾有一个「官方异步支付通知」方法（对应站内
+     * 通知端点，按《支付 MCP Server》文档实现了金额防篡改与幂等）。下线原因是
+     * **契约合规**——官方《A2M 接口契约》原文规定按量付费只实现 HTTP 402、
+     * Payment-Needed、Payment-Proof、payment.verify 和 fulfillment.confirm，
+     * **不得混入** AI 网页应用/移动应用收款的统一收单接口、异步通知及其回调地址。
+     * 统一收单异步通知属于网页/移动收款产品族；本项目是纯 Machine Pay 作品，
+     * 挂一个在生产部署里从不会有真实通知流入的回调端点（A2M 订单不走统一收单），
+     * 既是产品混用的合规瑕疵，也是一块接受任意 POST 的裸攻击面（无验签可伪造状态）。
+     * 付款结果的感知回到协议内通道：买方携 Payment-Proof 重试（唯一权威路径）+
+     * 订单状态查询端点轮询。合规性由 verify.sh §18.8「契约纯度审计」恒定守护。 */
 
     /**
      * 按交易号查订单（幂等重放走本地记录的短回路；字段口径与 findByOutTradeNo 一致）。
@@ -590,6 +554,33 @@ export function createOrderRepository({ file = process.env.SG_ORDERS_DB || 'data
       if (!tradeNo) return null;
       const row = selectOrderByTradeNo.get(tradeNo);
       return row ? mapOrderRow(row) : null;
+    },
+
+    /**
+     * 回执自愈候选单：PAID + PENDING_CONFIRM + trade_no 非空，
+     * 且 updated_at 落在 [now-maxAgeHours, now-graceMinutes] 窗口内。
+     *
+     * 为什么在仓储层做时间窗过滤：宽限期是给买方在途重试的独占窗口
+     * （src/a2m/sweeper.js 的安全边界），最老追溯防止永久失败订单无限烧重试。
+     * 时间比较放 JS 侧做——created_at/updated_at 是 ISO 字符串，SQLite 里
+     * 直接比需要 datetime() 换算，JS 侧 Date.parse 更直白也不怕格式漂移。
+     */
+    async listStuckConfirmations({ graceMinutes = 2, maxAgeHours = 72 } = {}) {
+      const rows = db
+        .prepare(
+          "SELECT * FROM orders WHERE order_status = 'PAID' AND fulfill_status = 'PENDING_CONFIRM'"
+          + " AND trade_no IS NOT NULL AND trade_no != '' ORDER BY updated_at ASC",
+        )
+        .all();
+      const nowMs = Date.now();
+      const earliest = nowMs - maxAgeHours * 3_600_000;
+      const latest = nowMs - graceMinutes * 60_000;
+      return rows
+        .map(mapOrderRow)
+        .filter((o) => {
+          const t = Date.parse(o.updatedAt ?? '');
+          return Number.isFinite(t) && t >= earliest && t <= latest;
+        });
     },
 
     /* ────────────── 权益额度台账 ────────────── */

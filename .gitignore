@@ -19,3 +19,11 @@ config/production.json
 
 # 生产 service_id 覆盖层（真实服务 id 不进公开仓库）
 config/services.production.json
+
+# 🔴 生产库运行痕迹（2026-11-27 清理时发现这 4 个文件已被 git 跟踪）
+#    prod-pay-ux-check.mjs 用临时配置起本地生产实例做契约检查时，会在 config/ 下
+#    留下 .prod-ux-*.db 及其 -wal/-shm。这是**运行痕迹**，不是配置，绝不能入库。
+config/.prod-ux-*
+
+# 留档目录（如 2026-11-21 损坏库备份）——证据留在本地，不进仓库
+data/archive/

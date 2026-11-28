@@ -27,10 +27,10 @@ PAYATHON 2026 · Machine Pay 赛道
   BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh
 
   # ② Agent 路径端到端：tools/list → 402 → 沙箱收银 → 交付 → 幂等重放（21 项）
-  node scripts/verify-mcp-flow.mjs
+  node scripts/verify/verify-mcp-flow.mjs
 
   # ③ 买家路径端到端：买十次包 → 转赠 → 兑换 → 余额交付 → 撤销 → 退款回收（17 项）
-  node scripts/verify-account-flow.mjs
+  node scripts/verify/verify-account-flow.mjs
 
   全部公开可复跑，无需任何账号或凭据。代码仓库：
   https://github.com/1739467001-svg/sceneguide （MIT，含完整提交历史）

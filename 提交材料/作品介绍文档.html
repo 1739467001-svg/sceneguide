@@ -47,8 +47,8 @@
   <div class="meta">演示地址：<b>https://121.43.80.231/sceneguide/</b> ｜ 代码开源：<b>https://github.com/1739467001-svg/sceneguide</b>（MIT，含完整提交历史）</div>
 
   <div class="kpis">
-    <div class="kpi"><b>88 项</b><span>可自行执行的验收断言</span></div>
-    <div class="kpi"><b>2 个</b><span>真实 OSM 场景（可切换）</span></div>
+    <div class="kpi"><b>92 项</b><span>可自行执行的验收断言</span></div>
+    <div class="kpi"><b>3 个</b><span>真实 OSM 场景（可切换）</span></div>
     <div class="kpi"><b>0%</b><span>个人开发者费率（至 12.31）</span></div>
     <div class="kpi"><b>5 步</b><span>完整支付协议链路</span></div>
   </div>
@@ -66,7 +66,7 @@
     <li>滚到底部「社区反馈」→ 留言、点赞——反馈按访客去重，墙上只有真实内容</li>
     <li>买一次「十次导览包」→ 打开「我的账户」：额度到账、生成<b>礼品码</b>转赠、申请退款、打印收据——买家视角的完整生命周期</li>
   </ol>
-  <div class="callout">不想相信页面任何描述？一条命令自己验（会真实走一遍支付宝沙箱收银）：<br><code>BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh</code> → 88 项全绿</div>
+  <div class="callout">不想相信页面任何描述？一条命令自己验（会真实走一遍支付宝沙箱收银）：<br><code>BASE_URL=https://121.43.80.231/sceneguide bash scripts/verify.sh</code> → 92 项全绿</div>
 
   <h2><span class="no">03</span>支付集成（Machine Pay · 全链路）</h2>
   <div style="margin:6px 0 14px">
@@ -74,13 +74,13 @@
   </div>
   <table>
     <tr><th style="width:46%">环节</th><th>实现要点</th></tr>
-    <tr><td>① 402 支付挑战</td><td>商家本地构造 Payment-Needed（字典序拼接 + RSA2 签名），<b>订单先落库再返回 402</b>；不调用预下单 OpenAPI</td></tr>
+    <tr><td>① 402 支付挑战</td><td>商家本地构造 Payment-Needed（字典序拼接 + RSA2 签名），<b>订单先落库再返回 402</b>；不调用预下单 OpenAPI（可选形态 B：调官方 precreate 取 amtPaymentLink 双头下发）</td></tr>
     <tr><td>② 买方支付</td><td>报文原样交给支付宝 <code>alipay-pay-for-402-service</code> 技能，引导用户付款</td></tr>
     <tr><td>③ 携凭证重试</td><td>Payment-Proof 重试同一请求；<code>client_session</code> 原样透传</td></tr>
     <tr><td>④ 验付与五项核验</td><td>active / amount / out_trade_no / resource_id / trade_no 未重复履约</td></tr>
-    <tr><td>⑤ 幂等履约与回执</td><td>UNFULFILLED→PENDING_CONFIRM→FULFILLED 状态机；履约回执失败可用同一凭证重试，不重复生成资源</td></tr>
+    <tr><td>⑤ 幂等履约与回执</td><td>UNFULFILLED→PENDING_CONFIRM→FULFILLED 状态机；回执失败可用同一凭证重试，服务端清扫器还会自动重发回执（入参只有 trade_no，商家可独立完成）</td></tr>
   </table>
-  <p style="font-size:13px"><b>MCP 发现</b>：POST /mcp（JSON-RPC 2.0），<code>tools/list</code> 暴露 <code>scene_guide</code>（<code>annotations.paid=true</code>）与 <code>scene_guide_scenes</code>；<code>tools/call</code> 付费工具返回 <code>payment_required</code> 与账单。另有 <code>llms.txt</code> 面向 Agent 描述全部端点与计费。</p>
+  <p style="font-size:13px"><b>MCP 发现</b>：POST /mcp（JSON-RPC 2.0），<code>tools/list</code> 暴露 <code>scene_guide</code>（<code>annotations.paid=true</code>）、<code>scene_guide_scenes</code> 与免费的 <code>scene_guide_settlement</code> 结算单核对工具；<code>tools/call</code> 付费工具返回 <code>payment_required</code> 与账单。另有 <code>llms.txt</code> 面向 Agent 描述全部端点与计费。</p>
 
   <h2><span class="no">04</span>商业化设计</h2>
   <table>
@@ -91,7 +91,7 @@
     <tr><td>首发半价 trial</td><td>¥4.95/次（限时）</td><td>同单次导览——社群首发转化档，同一服务内容独立定价（注册价=实收价约束）</td></tr>
   </table>
   <ul>
-    <li><b>自建计量层</b>：官方按量付费不提供自动计量——自建四维计量（调用/token/路径长度/点位数），只记录不参与扣费（平台要求注册价=实收价）</li>
+    <li><b>自建计量层</b>：官方按量付费不提供自动计量——自建四维计量（调用/token/路径长度/点位数），只记录不参与扣费（注册价=实收价）；每笔已支付订单出具 RSA2 签名用量结算单（statement + 公钥公开，第三方 openssl 离线验签，篡改必红）</li>
     <li><b>反刷量口径</b>：订单按来源标注 demo/api，自测订单永远不计入「真实付费用户」；免费试看双限流（访客 + IP 哈希，NAT 容忍量级）</li>
     <li><b>增长闭环</b>：首触渠道归因 → 转化漏斗按渠道拆分（含近 7 天周维度）→ <b>订单核验卡</b>让每笔已支付订单成为可分享的传播物（ref=share 归因回流）</li>
   </ul>
@@ -126,7 +126,7 @@
         <code>local_402_sandbox_pay.py</code> 去购买本服务——官方脚本自己发起请求、拿 402 账单、
         走官方沙箱收银付款、携 <code>Payment-Proof</code> 重试，并由<b>官方脚本自己</b>校验交付证据，
         结论原文「<b>AI 按量付费沙箱服务端联调通过</b>」。任何人都可复跑
-        <code>bash scripts/official-buyer-check.sh</code> 验证——不是自证，是主办方工具的判定</li>
+        <code>bash scripts/prod/official-buyer-check.sh</code> 验证——不是自证，是主办方工具的判定</li>
     <li><b>已启用 HTTPS（Let's Encrypt 为裸 IP 签发的短期证书）</b>：Chrome 会把 http:// 裸 IP 自动升级为 https://，无 TLS 时会硬拦截成空白错误页——现已直接给 121.43.80.231 上 TLS 并配 12 小时自动续期，评委点开链接直达作品；<b>安全上下文成立 → Service Worker 正常注册 →「可安装 PWA」（桌面应用形态）真实可用</b></li>
     <li>隐私最小化：不存任何个人信息，IP 只存加盐哈希</li>
     <li>基线安全响应头（nosniff/SAMEORIGIN/Referrer-Policy/COOP）；无 CDN 依赖可离线运行</li>
